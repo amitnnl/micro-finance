@@ -1,0 +1,40 @@
+# ----------------------------------------------------------------------
+# Backend Security & Access Control
+# ----------------------------------------------------------------------
+
+# Disable directory browsing
+Options -Indexes
+
+# Protect sensitive database files, environment configs, and code architecture
+<FilesMatch "(^\.|\.(env|sqlite|db|sql|log|md|json|lock)|Database\.php)$">
+  <IfModule mod_authz_core.c>
+    Require all denied
+  </IfModule>
+  <IfModule !mod_authz_core.c>
+    Order deny,allow
+    Deny from all
+  </IfModule>
+</FilesMatch>
+
+# Disallow direct browser requests to internal architecture folders
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+
+  # Pass Authorization Header to PHP FastCGI/FPM
+  RewriteCond %{HTTP:Authorization} .
+  RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+  # Allow public access only to the api directory and migration script
+  RewriteRule ^api/ - [L]
+  RewriteRule ^migrate\.php$ - [L]
+
+  # Block direct execution of files in config, controllers, helpers, models
+  RewriteRule ^(config|controllers|helpers|models)/ - [F,L]
+</IfModule>
+
+# Force API and backend responses to never be cached
+<IfModule mod_headers.c>
+  Header set Cache-Control "no-store, no-cache, must-revalidate, max-age=0"
+  Header set Pragma "no-cache"
+  Header set Expires "0"
+</IfModule>

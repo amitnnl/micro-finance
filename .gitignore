@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+
+# Production packages & staging
+hostinger-staging/
+hostinger-deploy/
+*.zip
+
+# Local SQLite databases & env
+database.sqlite
+*.sqlite
+.env
+db_config.php
+
+# IDE & OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+
+# Scratch & test scripts
+scratch/
+
+# Frontend build cache
+frontend/dist/
