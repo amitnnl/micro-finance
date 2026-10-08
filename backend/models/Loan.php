@@ -26,13 +26,25 @@ class Loan {
 
         $stmt = $this->db->prepare($query);
         $stmt->execute($params);
-        return $stmt->fetchAll();
+        $rows = $stmt->fetchAll();
+        foreach ($rows as &$r) {
+            $createdDate = !empty($r['created_at']) ? substr($r['created_at'], 0, 10) : date('Y-m-d');
+            $r['application_date'] = !empty($r['application_date']) ? $r['application_date'] : $createdDate;
+            $r['lead_date'] = !empty($r['lead_date']) ? $r['lead_date'] : $r['application_date'];
+        }
+        return $rows;
     }
 
     public function findById(int $id) {
         $stmt = $this->db->prepare("SELECT * FROM loans WHERE id = :id LIMIT 1");
         $stmt->execute(['id' => $id]);
-        return $stmt->fetch();
+        $loan = $stmt->fetch();
+        if ($loan) {
+            $createdDate = !empty($loan['created_at']) ? substr($loan['created_at'], 0, 10) : date('Y-m-d');
+            $loan['application_date'] = !empty($loan['application_date']) ? $loan['application_date'] : $createdDate;
+            $loan['lead_date'] = !empty($loan['lead_date']) ? $loan['lead_date'] : $loan['application_date'];
+        }
+        return $loan;
     }
 
     public function create(array $data) {
@@ -66,12 +78,18 @@ class Loan {
         $agreementNo = 'AGR-' . date('Y') . '-' . rand(10000, 99999);
         $loanNo = 'APP-' . date('Y') . '-' . rand(10000, 99999);
 
+        $leadDate = !empty($data['lead_date']) ? substr($data['lead_date'], 0, 10) : null;
+        $appDate = !empty($data['application_date']) ? substr($data['application_date'], 0, 10) : date('Y-m-d');
+        if (empty($leadDate)) {
+            $leadDate = $appDate;
+        }
+
         $sql = "INSERT INTO loans (
             loan_no, customer_id, agreement_no, customer_name, father_husband_name, phone, alternate_phone, dob, gender, aadhaar_number, pan_number, address, district, state, pin_code,
             co_applicant_name, co_applicant_father_husband, co_applicant_phone, co_applicant_dob, co_applicant_gender, co_applicant_aadhaar, co_applicant_pan, co_applicant_address, co_applicant_district, co_applicant_state, co_applicant_pin,
             guarantor_name, guarantor_father_husband, guarantor_phone, guarantor_dob, guarantor_gender, guarantor_aadhaar, guarantor_pan, guarantor_address, guarantor_district, guarantor_state, guarantor_pin,
             loan_purpose_code, loan_purpose_title, loan_amount, interest_rate, tenure_months, emi_amount, total_payment, interest_amount, balance_outstanding,
-            received_count, pending_count, status, employment_type, occupation, monthly_income_range, earning_members, bank_account_no, bank_ifsc, bank_micr, bank_name, account_holder_name, reference_name, reference_phone, reference_relation,
+            received_count, pending_count, status, lead_date, application_date, employment_type, occupation, monthly_income_range, earning_members, bank_account_no, bank_ifsc, bank_micr, bank_name, account_holder_name, reference_name, reference_phone, reference_relation,
             doc_aadhaar, doc_pan, doc_photo, doc_passbook, doc_address_proof, doc_co_aadhaar, doc_guarantor_aadhaar,
             terms_accepted, additional_notes
         ) VALUES (
@@ -79,7 +97,7 @@ class Loan {
             :co_applicant_name, :co_applicant_father_husband, :co_applicant_phone, :co_applicant_dob, :co_applicant_gender, :co_applicant_aadhaar, :co_applicant_pan, :co_applicant_address, :co_applicant_district, :co_applicant_state, :co_applicant_pin,
             :guarantor_name, :guarantor_father_husband, :guarantor_phone, :guarantor_dob, :guarantor_gender, :guarantor_aadhaar, :guarantor_pan, :guarantor_address, :guarantor_district, :guarantor_state, :guarantor_pin,
             :loan_purpose_code, :loan_purpose_title, :loan_amount, :interest_rate, :tenure_months, :emi_amount, :total_payment, :interest_amount, :balance_outstanding,
-            0, :pending_count, 'Pending Approval', :employment_type, :occupation, :monthly_income_range, :earning_members, :bank_account_no, :bank_ifsc, :bank_micr, :bank_name, :account_holder_name, :reference_name, :reference_phone, :reference_relation,
+            0, :pending_count, 'Pending Approval', :lead_date, :application_date, :employment_type, :occupation, :monthly_income_range, :earning_members, :bank_account_no, :bank_ifsc, :bank_micr, :bank_name, :account_holder_name, :reference_name, :reference_phone, :reference_relation,
             :doc_aadhaar, :doc_pan, :doc_photo, :doc_passbook, :doc_address_proof, :doc_co_aadhaar, :doc_guarantor_aadhaar,
             :terms_accepted, :additional_notes
         )";
@@ -89,6 +107,8 @@ class Loan {
             'loan_no' => $loanNo,
             'customer_id' => $customerId,
             'agreement_no' => $agreementNo,
+            'lead_date' => $leadDate,
+            'application_date' => $appDate,
             'customer_name' => $data['customer_name'],
             'father_husband_name' => $data['father_husband_name'] ?? null,
             'phone' => $data['phone'],
@@ -174,7 +194,189 @@ class Loan {
         ];
     }
 
-    public function approve(int $id, string $notes = '') {
+    public function update(int $id, array $data) {
+        $loan = $this->findById($id);
+        if (!$loan) {
+            throw new Exception("Loan record not found");
+        }
+
+        // Strict Post-Approval Protection: Applications cannot be edited after approval
+        $editableStatuses = ['Pending Approval', 'Draft', 'Pending'];
+        if (!in_array($loan['status'], $editableStatuses)) {
+            throw new Exception("This loan application has already been approved (Status: {$loan['status']}) and is strictly locked. Edits are not permitted after credit approval.");
+        }
+
+        $principal = (float)ceil((float)($data['loan_amount'] ?? $loan['loan_amount']));
+        if ($principal < 1000 || $principal > 200000) {
+            throw new Exception("Microfinance loan amount must be between ₹1,000 and ₹2,00,000");
+        }
+        $rate = (float)($data['interest_rate'] ?? $loan['interest_rate'] ?? 14.5);
+        $months = (int)($data['tenure_months'] ?? $loan['tenure_months'] ?? 24);
+
+        // Recalculate financial breakdown
+        $monthlyRate = ($rate / 12) / 100;
+        $emi = ($principal * $monthlyRate * pow(1 + $monthlyRate, $months)) / (pow(1 + $monthlyRate, $months) - 1);
+        $emiAmount = (float)ceil($emi);
+        $totalPayment = (float)ceil($emiAmount * $months);
+        $interestAmount = (float)ceil($totalPayment - $principal);
+
+        $leadDate = !empty($data['lead_date']) ? substr($data['lead_date'], 0, 10) : $loan['lead_date'];
+        $appDate = !empty($data['application_date']) ? substr($data['application_date'], 0, 10) : $loan['application_date'];
+
+        $sql = "UPDATE loans SET
+            customer_name = :customer_name,
+            father_husband_name = :father_husband_name,
+            phone = :phone,
+            alternate_phone = :alternate_phone,
+            dob = :dob,
+            gender = :gender,
+            aadhaar_number = :aadhaar_number,
+            pan_number = :pan_number,
+            address = :address,
+            district = :district,
+            state = :state,
+            pin_code = :pin_code,
+
+            co_applicant_name = :co_applicant_name,
+            co_applicant_father_husband = :co_applicant_father_husband,
+            co_applicant_phone = :co_applicant_phone,
+            co_applicant_dob = :co_applicant_dob,
+            co_applicant_gender = :co_applicant_gender,
+            co_applicant_aadhaar = :co_applicant_aadhaar,
+            co_applicant_pan = :co_applicant_pan,
+            co_applicant_address = :co_applicant_address,
+            co_applicant_district = :co_applicant_district,
+            co_applicant_state = :co_applicant_state,
+            co_applicant_pin = :co_applicant_pin,
+
+            guarantor_name = :guarantor_name,
+            guarantor_father_husband = :guarantor_father_husband,
+            guarantor_phone = :guarantor_phone,
+            guarantor_dob = :guarantor_dob,
+            guarantor_gender = :guarantor_gender,
+            guarantor_aadhaar = :guarantor_aadhaar,
+            guarantor_pan = :guarantor_pan,
+            guarantor_address = :guarantor_address,
+            guarantor_district = :guarantor_district,
+            guarantor_state = :guarantor_state,
+            guarantor_pin = :guarantor_pin,
+
+            loan_purpose_code = :loan_purpose_code,
+            loan_purpose_title = :loan_purpose_title,
+            loan_amount = :loan_amount,
+            interest_rate = :interest_rate,
+            tenure_months = :tenure_months,
+            emi_amount = :emi_amount,
+            total_payment = :total_payment,
+            interest_amount = :interest_amount,
+            balance_outstanding = :balance_outstanding,
+            pending_count = :pending_count,
+
+            lead_date = :lead_date,
+            application_date = :application_date,
+            employment_type = :employment_type,
+            occupation = :occupation,
+            monthly_income_range = :monthly_income_range,
+            earning_members = :earning_members,
+            bank_account_no = :bank_account_no,
+            bank_ifsc = :bank_ifsc,
+            bank_micr = :bank_micr,
+            bank_name = :bank_name,
+            account_holder_name = :account_holder_name,
+            reference_name = :reference_name,
+            reference_phone = :reference_phone,
+            reference_relation = :reference_relation,
+
+            doc_aadhaar = COALESCE(:doc_aadhaar, doc_aadhaar),
+            doc_pan = COALESCE(:doc_pan, doc_pan),
+            doc_photo = COALESCE(:doc_photo, doc_photo),
+            doc_passbook = COALESCE(:doc_passbook, doc_passbook),
+            doc_address_proof = COALESCE(:doc_address_proof, doc_address_proof),
+            doc_co_aadhaar = COALESCE(:doc_co_aadhaar, doc_co_aadhaar),
+            doc_guarantor_aadhaar = COALESCE(:doc_guarantor_aadhaar, doc_guarantor_aadhaar),
+            additional_notes = :additional_notes
+        WHERE id = :id";
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute([
+            'id' => $id,
+            'customer_name' => $data['customer_name'] ?? $loan['customer_name'],
+            'father_husband_name' => $data['father_husband_name'] ?? $loan['father_husband_name'],
+            'phone' => $data['phone'] ?? $loan['phone'],
+            'alternate_phone' => $data['alternate_phone'] ?? $loan['alternate_phone'],
+            'dob' => $data['dob'] ?? $loan['dob'],
+            'gender' => $data['gender'] ?? $loan['gender'] ?? 'Male',
+            'aadhaar_number' => $data['aadhaar_number'] ?? $loan['aadhaar_number'],
+            'pan_number' => $data['pan_number'] ?? $loan['pan_number'],
+            'address' => $data['address'] ?? $loan['address'],
+            'district' => $data['district'] ?? $loan['district'],
+            'state' => $data['state'] ?? $loan['state'] ?? 'Haryana',
+            'pin_code' => $data['pin_code'] ?? $loan['pin_code'],
+
+            'co_applicant_name' => $data['co_applicant_name'] ?? $loan['co_applicant_name'],
+            'co_applicant_father_husband' => $data['co_applicant_father_husband'] ?? $loan['co_applicant_father_husband'],
+            'co_applicant_phone' => $data['co_applicant_phone'] ?? $loan['co_applicant_phone'],
+            'co_applicant_dob' => $data['co_applicant_dob'] ?? $loan['co_applicant_dob'],
+            'co_applicant_gender' => $data['co_applicant_gender'] ?? $loan['co_applicant_gender'] ?? 'Male',
+            'co_applicant_aadhaar' => $data['co_applicant_aadhaar'] ?? $loan['co_applicant_aadhaar'],
+            'co_applicant_pan' => $data['co_applicant_pan'] ?? $loan['co_applicant_pan'],
+            'co_applicant_address' => $data['co_applicant_address'] ?? $loan['co_applicant_address'],
+            'co_applicant_district' => $data['co_applicant_district'] ?? $loan['co_applicant_district'],
+            'co_applicant_state' => $data['co_applicant_state'] ?? $loan['co_applicant_state'] ?? 'Haryana',
+            'co_applicant_pin' => $data['co_applicant_pin'] ?? $loan['co_applicant_pin'],
+
+            'guarantor_name' => $data['guarantor_name'] ?? $loan['guarantor_name'],
+            'guarantor_father_husband' => $data['guarantor_father_husband'] ?? $loan['guarantor_father_husband'],
+            'guarantor_phone' => $data['guarantor_phone'] ?? $loan['guarantor_phone'],
+            'guarantor_dob' => $data['guarantor_dob'] ?? $loan['guarantor_dob'],
+            'guarantor_gender' => $data['guarantor_gender'] ?? $loan['guarantor_gender'] ?? 'Male',
+            'guarantor_aadhaar' => $data['guarantor_aadhaar'] ?? $loan['guarantor_aadhaar'],
+            'guarantor_pan' => $data['guarantor_pan'] ?? $loan['guarantor_pan'],
+            'guarantor_address' => $data['guarantor_address'] ?? $loan['guarantor_address'],
+            'guarantor_district' => $data['guarantor_district'] ?? $loan['guarantor_district'],
+            'guarantor_state' => $data['guarantor_state'] ?? $loan['guarantor_state'] ?? 'Haryana',
+            'guarantor_pin' => $data['guarantor_pin'] ?? $loan['guarantor_pin'],
+
+            'loan_purpose_code' => $data['loan_purpose_code'] ?? $loan['loan_purpose_code'] ?? 'MICRO',
+            'loan_purpose_title' => $data['loan_purpose_title'] ?? $loan['loan_purpose_title'] ?? 'Microfinance Loan',
+            'loan_amount' => $principal,
+            'interest_rate' => $rate,
+            'tenure_months' => $months,
+            'emi_amount' => $emiAmount,
+            'total_payment' => $totalPayment,
+            'interest_amount' => $interestAmount,
+            'balance_outstanding' => $totalPayment,
+            'pending_count' => $months,
+
+            'lead_date' => $leadDate,
+            'application_date' => $appDate,
+            'employment_type' => $data['employment_type'] ?? $loan['employment_type'] ?? 'Salaried',
+            'occupation' => $data['occupation'] ?? $loan['occupation'],
+            'monthly_income_range' => $data['monthly_income_range'] ?? $loan['monthly_income_range'],
+            'earning_members' => (int)($data['earning_members'] ?? $loan['earning_members'] ?? 1),
+            'bank_account_no' => $data['bank_account_no'] ?? $loan['bank_account_no'],
+            'bank_ifsc' => $data['bank_ifsc'] ?? $loan['bank_ifsc'],
+            'bank_micr' => $data['bank_micr'] ?? $loan['bank_micr'],
+            'bank_name' => $data['bank_name'] ?? $loan['bank_name'],
+            'account_holder_name' => $data['account_holder_name'] ?? $loan['account_holder_name'],
+            'reference_name' => $data['reference_name'] ?? $loan['reference_name'],
+            'reference_phone' => $data['reference_phone'] ?? $loan['reference_phone'],
+            'reference_relation' => $data['reference_relation'] ?? $loan['reference_relation'],
+
+            'doc_aadhaar' => !empty($data['doc_aadhaar']) ? $data['doc_aadhaar'] : null,
+            'doc_pan' => !empty($data['doc_pan']) ? $data['doc_pan'] : null,
+            'doc_photo' => !empty($data['doc_photo']) ? $data['doc_photo'] : null,
+            'doc_passbook' => !empty($data['doc_passbook']) ? $data['doc_passbook'] : null,
+            'doc_address_proof' => !empty($data['doc_address_proof']) ? $data['doc_address_proof'] : null,
+            'doc_co_aadhaar' => !empty($data['doc_co_aadhaar']) ? $data['doc_co_aadhaar'] : null,
+            'doc_guarantor_aadhaar' => !empty($data['doc_guarantor_aadhaar']) ? $data['doc_guarantor_aadhaar'] : null,
+            'additional_notes' => $data['additional_notes'] ?? $loan['additional_notes']
+        ]);
+
+        return $this->findById($id);
+    }
+
+    public function approve(int $id, string $notes = '', ?string $approvalDate = null) {
         $loan = $this->findById($id);
         if (!$loan) {
             throw new Exception("Loan record not found");
@@ -187,8 +389,10 @@ class Loan {
             throw new Exception("Loan application is already approved and ready for disbursement");
         }
 
-        $stmt = $this->db->prepare("UPDATE loans SET status = 'Approved', approval_date = CURRENT_DATE, approval_notes = :notes WHERE id = :id");
+        $apprDate = !empty($approvalDate) ? substr($approvalDate, 0, 10) : date('Y-m-d');
+        $stmt = $this->db->prepare("UPDATE loans SET status = 'Approved', approval_date = :approval_date, approval_notes = :notes WHERE id = :id");
         $stmt->execute([
+            'approval_date' => $apprDate,
             'notes' => $notes ?: 'Approved by Administrator',
             'id' => $id
         ]);
@@ -268,7 +472,7 @@ class Loan {
         }
     }
 
-    public function getStats() {
+    public function getStats(bool $isAdmin = true) {
         $stmt = $this->db->prepare("
             SELECT 
                 COUNT(*) as total_loans,
@@ -286,19 +490,32 @@ class Loan {
         $stmt->execute();
         $stats = $stmt->fetch();
         
-        // Ensure null values are converted to 0
-        return [
+        // Base operational workflow metrics safe for all roles (Manager & Staff)
+        $result = [
             'total_loans' => (int)($stats['total_loans'] ?? 0),
-            'total_disbursed' => (float)ceil((float)($stats['total_disbursed'] ?? 0)),
-            'total_outstanding' => (float)ceil((float)($stats['total_outstanding'] ?? 0)),
-            'total_received' => (float)ceil((float)($stats['total_received'] ?? 0)),
-            'expected_interest' => (float)ceil((float)($stats['expected_interest'] ?? 0)),
             'avg_tenure' => round((float)($stats['avg_tenure'] ?? 0), 1),
             'emis_cleared' => (int)($stats['emis_cleared'] ?? 0),
             'active_loans' => (int)($stats['active_loans'] ?? 0),
             'pending_approvals' => (int)($stats['pending_approvals'] ?? 0),
             'pending_disbursements' => (int)($stats['pending_disbursements'] ?? 0)
         ];
+
+        // Financial, Income, Expense, Profit/Loss data STRICTLY for Admin
+        if ($isAdmin) {
+            require_once __DIR__ . '/FinancialRecord.php';
+            $finModel = new FinancialRecord();
+            $finSummary = $finModel->getSummary();
+
+            $result['total_disbursed'] = (float)ceil((float)($stats['total_disbursed'] ?? 0));
+            $result['total_outstanding'] = (float)ceil((float)($stats['total_outstanding'] ?? 0));
+            $result['total_received'] = (float)ceil((float)($stats['total_received'] ?? 0));
+            $result['expected_interest'] = (float)ceil((float)($stats['expected_interest'] ?? 0));
+            $result['total_income'] = (float)ceil((float)($finSummary['total_income'] ?? 0));
+            $result['total_expense'] = (float)ceil((float)($finSummary['total_expense'] ?? 0));
+            $result['net_profit'] = (float)ceil((float)($finSummary['net_profit'] ?? 0));
+        }
+
+        return $result;
     }
 
     public function checkDocuments(array $docs, string $currentRole = 'applicant') {
@@ -515,55 +732,149 @@ class Loan {
         $insertedIds = [];
 
         $aliasMap = [
-            'customer_name' => ['customer_name', 'name', 'borrower_name', 'client_name', 'applicant_name', 'applicant_full_name', 'borrower_full_name'],
-            'father_husband_name' => ['father_husband_name', 'father_name', 'husband_name', 'father_husband', 'guardian_name', 'father_s_name'],
-            'phone' => ['phone', 'mobile', 'mobile_number', 'phone_number', 'contact', 'primary_phone', 'primary_mobile'],
-            'alternate_phone' => ['alternate_phone', 'alt_phone', 'alternate_mobile', 'alt_mobile', 'secondary_phone'],
-            'dob' => ['dob', 'date_of_birth', 'birth_date', 'birthdate'],
+            'customer_name' => [
+                'customer_name', 'name', 'borrower_name', 'client_name', 'applicant_name', 'applicant_full_name',
+                'borrower_full_name', 'primary_borrower', 'customer', 'borrower', 'client', 'applicant', 'member_name'
+            ],
+            'father_husband_name' => [
+                'father_husband_name', 'father_name', 'husband_name', 'father_husband', 'guardian_name', 'father_s_name',
+                'parent_name', 'guardian', 'father', 'husband', 's_o_w_o', 'so_wo'
+            ],
+            'phone' => [
+                'phone', 'mobile', 'mobile_number', 'phone_number', 'contact', 'primary_phone', 'primary_mobile',
+                'contact_no', 'cell', 'mobile_no', 'phone_no', 'borrower_phone', 'customer_phone', 'borrower_mobile'
+            ],
+            'alternate_phone' => [
+                'alternate_phone', 'alt_phone', 'alternate_mobile', 'alt_mobile', 'secondary_phone', 'secondary_mobile',
+                'emergency_contact', 'other_phone', 'other_mobile'
+            ],
+            'dob' => ['dob', 'date_of_birth', 'birth_date', 'birthdate', 'borrower_dob'],
             'gender' => ['gender', 'sex'],
-            'aadhaar_number' => ['aadhaar_number', 'aadhaar', 'aadhar', 'aadhar_number', 'uid', 'aadhaar_no', 'aadhar_no'],
-            'pan_number' => ['pan_number', 'pan', 'pan_no', 'pan_card'],
-            'address' => ['address', 'residential_address', 'full_address', 'current_address', 'street_address'],
-            'district' => ['district', 'city', 'town'],
+            'aadhaar_number' => [
+                'aadhaar_number', 'aadhaar', 'aadhar', 'aadhar_number', 'uid', 'aadhaar_no', 'aadhar_no',
+                'uidai', 'borrower_aadhaar', 'applicant_aadhaar'
+            ],
+            'pan_number' => ['pan_number', 'pan', 'pan_no', 'pan_card', 'borrower_pan', 'applicant_pan'],
+            'address' => [
+                'address', 'residential_address', 'full_address', 'current_address', 'street_address', 'village', 'colony'
+            ],
+            'district' => ['district', 'city', 'town', 'tehsil'],
             'state' => ['state', 'province'],
             'pin_code' => ['pin_code', 'pin', 'pincode', 'postal_code', 'zip', 'zip_code'],
-            'loan_amount' => ['loan_amount', 'amount', 'principal', 'sanction_amount', 'loan_principal'],
-            'interest_rate' => ['interest_rate', 'rate', 'interest', 'roi', 'annual_interest_rate'],
-            'tenure_months' => ['tenure_months', 'tenure', 'months', 'duration', 'tenure_in_months', 'period'],
-            'emi_amount' => ['emi_amount', 'emi', 'monthly_emi', 'installment'],
-            'loan_purpose_title' => ['loan_purpose_title', 'purpose', 'loan_purpose', 'purpose_of_loan', 'loan_category'],
-            'bank_name' => ['bank_name', 'bank', 'bank_title'],
-            'bank_account_no' => ['bank_account_no', 'account_no', 'account_number', 'bank_account', 'bank_acct_no'],
+            'loan_amount' => [
+                'loan_amount', 'amount', 'principal', 'sanction_amount', 'sanctioned_amount', 'sanction_principal',
+                'sanctioned_principal', 'loan_principal', 'loan_amt', 'principal_amount', 'applied_amount',
+                'disbursed_amount', 'net_amount', 'sanctioned_principal_rs', 'loan_amount_rs', 'amount_rs',
+                'principal_rs', 'loan_amount_in_rs', 'sanctioned_limit', 'approved_amount', 'finance_amount'
+            ],
+            'interest_rate' => [
+                'interest_rate', 'rate', 'interest', 'roi', 'annual_interest_rate', 'rate_of_interest',
+                'annual_rate', 'interest_pct', 'rate_pct'
+            ],
+            'tenure_months' => [
+                'tenure_months', 'tenure', 'months', 'duration', 'tenure_in_months', 'period',
+                'loan_tenure', 'total_emis', 'installments'
+            ],
+            'emi_amount' => ['emi_amount', 'emi', 'monthly_emi', 'installment', 'monthly_installment'],
+            'loan_purpose_title' => [
+                'loan_purpose_title', 'purpose', 'loan_purpose', 'purpose_of_loan', 'loan_category',
+                'product_type', 'loan_type'
+            ],
+            'bank_name' => ['bank_name', 'bank', 'bank_title', 'borrower_bank'],
+            'bank_account_no' => [
+                'bank_account_no', 'account_no', 'account_number', 'bank_account', 'bank_acct_no',
+                'ac_no', 'acct_no', 'bank_acc_no'
+            ],
             'bank_ifsc' => ['bank_ifsc', 'ifsc', 'ifsc_code'],
             'bank_micr' => ['bank_micr', 'micr', 'micr_code'],
-            'status' => ['status', 'loan_status', 'current_status'],
-            'disbursement_date' => ['disbursement_date', 'disbursed_on', 'disbursed_date', 'disbursal_date'],
+            'status' => ['status', 'loan_status', 'current_status', 'stage'],
+            'lead_date' => ['lead_date', 'inquiry_date', 'origination_date', 'lead_origination_date'],
+            'application_date' => ['application_date', 'applied_date', 'submission_date', 'created_date', 'created_at'],
+            'approval_date' => ['approval_date', 'sanction_date', 'approved_date', 'sanctioned_date'],
+            'disbursement_date' => ['disbursement_date', 'disbursed_on', 'disbursed_date', 'disbursal_date', 'payout_date', 'start_date'],
+            'disbursement_mode' => ['disbursement_mode', 'payout_mode', 'payment_mode'],
             'agreement_no' => ['agreement_no', 'agreement_number', 'agreement', 'agr_no'],
             'customer_id' => ['customer_id', 'cust_id', 'cif', 'client_id', 'borrower_id'],
-            'loan_no' => ['loan_no', 'application_no', 'app_no', 'loan_number', 'application_number'],
-            'co_applicant_name' => ['co_applicant_name', 'co_applicant', 'coapplicant_name', 'nominee_name'],
+            'loan_no' => ['loan_no', 'application_no', 'app_no', 'loan_number', 'application_number', 'loan_no_app_no'],
+            'co_applicant_name' => ['co_applicant_name', 'co_applicant', 'coapplicant_name', 'nominee_name', 'co_borrower'],
             'co_applicant_phone' => ['co_applicant_phone', 'co_applicant_mobile'],
             'co_applicant_aadhaar' => ['co_applicant_aadhaar', 'co_applicant_aadhar'],
-            'guarantor_name' => ['guarantor_name', 'guarantor', 'surety_name'],
+            'guarantor_name' => ['guarantor_name', 'guarantor', 'surety_name', 'surety'],
             'guarantor_phone' => ['guarantor_phone', 'guarantor_mobile'],
             'guarantor_aadhaar' => ['guarantor_aadhaar', 'guarantor_aadhar'],
-            'received_count' => ['received_count', 'emis_received', 'cleared_emis', 'paid_emis'],
-            'balance_outstanding' => ['balance_outstanding', 'outstanding_balance', 'remaining_balance', 'balance']
+            'received_count' => ['received_count', 'emis_received', 'cleared_emis', 'paid_emis', 'emis_paid', 'installments_paid'],
+            'balance_outstanding' => ['balance_outstanding', 'outstanding_balance', 'remaining_balance', 'balance', 'outstanding']
         ];
 
         foreach ($rows as $index => $rawRow) {
             $rowNum = $index + 2; // 1-indexed, header is line 1
             $data = [];
             foreach ($rawRow as $k => $v) {
-                $cleanKey = strtolower(trim(preg_replace('/[^a-zA-Z0-9]/', '_', (string)$k), '_'));
+                $cleanKey = strtolower(trim(preg_replace('/[^a-zA-Z0-9]+/', '_', (string)$k), '_'));
+                $alphaKey = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', (string)$k));
                 $matchedCanonical = $cleanKey;
+
                 foreach ($aliasMap as $canonical => $aliases) {
-                    if (in_array($cleanKey, $aliases)) {
+                    if ($cleanKey === $canonical || $alphaKey === strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $canonical))) {
                         $matchedCanonical = $canonical;
                         break;
                     }
+                    foreach ($aliases as $alias) {
+                        $aliasAlpha = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $alias));
+                        if ($cleanKey === $alias || $alphaKey === $aliasAlpha) {
+                            $matchedCanonical = $canonical;
+                            break 2;
+                        }
+                    }
                 }
-                $data[$matchedCanonical] = is_string($v) ? trim($v) : $v;
+
+                if (!isset($data[$matchedCanonical]) || ($data[$matchedCanonical] === '' && $v !== '')) {
+                    $data[$matchedCanonical] = is_string($v) ? trim($v) : $v;
+                }
+            }
+
+            // Fallback 1: Intelligently locate loan_amount if not matched directly
+            if (empty($data['loan_amount']) || (float)preg_replace('/[^0-9.]/', '', (string)$data['loan_amount']) <= 0) {
+                foreach ($rawRow as $k => $v) {
+                    $kLower = strtolower($k);
+                    if (strpos($kLower, 'amount') !== false || strpos($kLower, 'principal') !== false || strpos($kLower, 'sanction') !== false) {
+                        $cand = (float)preg_replace('/[^0-9.]/', '', (string)$v);
+                        if ($cand > 0) {
+                            $data['loan_amount'] = $cand;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Fallback 2: Locate customer_name if not matched directly
+            if (empty($data['customer_name'])) {
+                foreach ($rawRow as $k => $v) {
+                    $kLower = strtolower($k);
+                    if ((strpos($kLower, 'name') !== false || strpos($kLower, 'borrower') !== false || strpos($kLower, 'customer') !== false) &&
+                        strpos($kLower, 'father') === false && strpos($kLower, 'husband') === false && strpos($kLower, 'bank') === false &&
+                        strpos($kLower, 'co_') === false && strpos($kLower, 'guarantor') === false) {
+                        if (!empty(trim((string)$v))) {
+                            $data['customer_name'] = trim((string)$v);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Fallback 3: Locate mobile phone if not matched directly
+            if (empty($data['phone'])) {
+                foreach ($rawRow as $k => $v) {
+                    $kLower = strtolower($k);
+                    if ((strpos($kLower, 'mobile') !== false || strpos($kLower, 'phone') !== false || strpos($kLower, 'contact') !== false) &&
+                        strpos($kLower, 'alt') === false && strpos($kLower, 'co_') === false && strpos($kLower, 'guarantor') === false) {
+                        $digits = preg_replace('/\D/', '', (string)$v);
+                        if (strlen($digits) >= 10) {
+                            $data['phone'] = substr($digits, -10);
+                            break;
+                        }
+                    }
+                }
             }
 
             // Basic validation
@@ -586,21 +897,22 @@ class Loan {
             }
 
             try {
-                $rate = !empty($data['interest_rate']) ? (float)$data['interest_rate'] : 35.0;
-                $months = !empty($data['tenure_months']) ? (int)$data['tenure_months'] : 24;
+                $rate = !empty($data['interest_rate']) ? (float)preg_replace('/[^0-9.]/', '', (string)$data['interest_rate']) : 14.5;
+                if ($rate <= 0) $rate = 14.5;
+                $months = !empty($data['tenure_months']) ? (int)preg_replace('/\D/', '', (string)$data['tenure_months']) : 24;
                 if ($months <= 0) $months = 24;
 
                 // Compute Financial Math with CEIL
                 $monthlyRate = ($rate / 12) / 100;
                 $computedEmi = ($principal * $monthlyRate * pow(1 + $monthlyRate, $months)) / (pow(1 + $monthlyRate, $months) - 1);
-                $emiAmount = !empty($data['emi_amount']) ? (float)ceil((float)$data['emi_amount']) : (float)ceil($computedEmi);
+                $emiAmount = !empty($data['emi_amount']) ? (float)ceil((float)preg_replace('/[^0-9.]/', '', (string)$data['emi_amount'])) : (float)ceil($computedEmi);
                 $totalPayment = (float)ceil($emiAmount * $months);
                 $interestAmount = (float)ceil($totalPayment - $principal);
 
                 // Received count and outstanding balance
-                $recCount = isset($data['received_count']) && $data['received_count'] !== '' ? (int)$data['received_count'] : 0;
+                $recCount = isset($data['received_count']) && $data['received_count'] !== '' ? (int)preg_replace('/\D/', '', (string)$data['received_count']) : 0;
                 if (isset($data['balance_outstanding']) && $data['balance_outstanding'] !== '') {
-                    $balance = (float)ceil((float)$data['balance_outstanding']);
+                    $balance = (float)ceil((float)preg_replace('/[^0-9.]/', '', (string)$data['balance_outstanding']));
                 } else {
                     $balance = (float)ceil(max(0, $totalPayment - ($emiAmount * $recCount)));
                 }
@@ -627,6 +939,10 @@ class Loan {
                     $status = 'Active';
                 }
 
+                // Milestone dates resolution
+                $appDate = !empty($data['application_date']) ? $data['application_date'] : date('Y-m-d');
+                $leadDate = !empty($data['lead_date']) ? $data['lead_date'] : $appDate;
+                $approvalDate = !empty($data['approval_date']) ? $data['approval_date'] : ($status === 'Approved' || $status === 'Active' || $status === 'Closed' ? $appDate : null);
                 $disbDate = !empty($data['disbursement_date']) ? $data['disbursement_date'] : ($status === 'Active' || $status === 'Closed' ? date('Y-m-d') : null);
 
                 $sql = "INSERT INTO loans (
@@ -634,7 +950,7 @@ class Loan {
                     co_applicant_name, co_applicant_phone, co_applicant_aadhaar,
                     guarantor_name, guarantor_phone, guarantor_aadhaar,
                     loan_purpose_code, loan_purpose_title, loan_amount, interest_rate, tenure_months, emi_amount, total_payment, interest_amount, balance_outstanding,
-                    received_count, pending_count, status, disbursement_date, disbursement_mode,
+                    received_count, pending_count, status, lead_date, application_date, approval_date, disbursement_date, disbursement_mode,
                     bank_account_no, bank_ifsc, bank_micr, bank_name, account_holder_name,
                     terms_accepted, additional_notes
                 ) VALUES (
@@ -642,7 +958,7 @@ class Loan {
                     :co_applicant_name, :co_applicant_phone, :co_applicant_aadhaar,
                     :guarantor_name, :guarantor_phone, :guarantor_aadhaar,
                     :loan_purpose_code, :loan_purpose_title, :loan_amount, :interest_rate, :tenure_months, :emi_amount, :total_payment, :interest_amount, :balance_outstanding,
-                    :received_count, :pending_count, :status, :disbursement_date, :disbursement_mode,
+                    :received_count, :pending_count, :status, :lead_date, :application_date, :approval_date, :disbursement_date, :disbursement_mode,
                     :bank_account_no, :bank_ifsc, :bank_micr, :bank_name, :account_holder_name,
                     1, :additional_notes
                 )";
@@ -685,6 +1001,9 @@ class Loan {
                     'received_count' => $recCount,
                     'pending_count' => max(0, $months - $recCount),
                     'status' => $status,
+                    'lead_date' => $leadDate,
+                    'application_date' => $appDate,
+                    'approval_date' => $approvalDate,
                     'disbursement_date' => $disbDate,
                     'disbursement_mode' => $data['disbursement_mode'] ?? 'Bank Transfer',
 

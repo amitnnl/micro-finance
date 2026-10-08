@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
 import { 
   DollarSign, 
@@ -9,6 +10,7 @@ import {
   AlertCircle, 
   ArrowUpRight, 
   TrendingUp, 
+  TrendingDown,
   PlusCircle, 
   Receipt, 
   Loader2,
@@ -19,10 +21,16 @@ import {
   CreditCard,
   ArrowRight,
   PieChart,
-  Sparkles
+  Sparkles,
+  Scale,
+  Clock,
+  Wallet,
+  Building2,
+  LineChart
 } from 'lucide-react';
 
 export default function DashboardPage() {
+  const { user, role, isAdmin, isManager, isStaff } = useAuth();
   const { settings } = useSettings();
   const [stats, setStats] = useState(null);
   const [recentLoans, setRecentLoans] = useState([]);
@@ -57,64 +65,108 @@ export default function DashboardPage() {
     );
   }
 
+  // Base operational metrics safe for all roles
   const totalLoans = parseInt(stats?.total_loans ?? 0, 10);
   const activeLoans = parseInt(stats?.active_loans ?? 0, 10);
+  const pendingApprovals = parseInt(stats?.pending_approvals ?? 0, 10);
+  const pendingDisbursements = parseInt(stats?.pending_disbursements ?? 0, 10);
+  const emisCleared = parseInt(stats?.emis_cleared ?? 0, 10);
+  const avgTenure = parseFloat(stats?.avg_tenure ?? 0);
+
+  // Financial figures strictly for Admin
   const totalDisbursed = parseFloat(stats?.total_disbursed ?? 0);
   const totalReceived = parseFloat(stats?.total_received ?? 0);
   const totalOutstanding = parseFloat(stats?.total_outstanding ?? 0);
-  const emisCleared = parseInt(stats?.emis_cleared ?? 0, 10);
-  const avgTenure = parseFloat(stats?.avg_tenure ?? 0);
   const expectedInterest = parseFloat(stats?.expected_interest ?? 0);
+  const totalIncome = parseFloat(stats?.total_income ?? 0);
+  const totalExpense = parseFloat(stats?.total_expense ?? 0);
+  const netProfit = parseFloat(stats?.net_profit ?? 0);
 
   const isEmpty = totalLoans === 0 && recentLoans.length === 0;
 
   const totalDemand = totalReceived + totalOutstanding;
   const efficiencyRate = totalDemand > 0 ? Math.min(100, Math.round((totalReceived / totalDemand) * 100)) : 0;
 
-  const kpiCards = [
-    {
-      title: 'Total Disbursed Capital',
-      value: `₹${Math.ceil(totalDisbursed).toLocaleString()}`,
-      change: isEmpty ? 'Fresh Database' : '+14.2% MoM',
-      desc: isEmpty ? 'Zero capital disbursed yet' : 'Active portfolio sanction',
-      icon: DollarSign,
-      trendType: isEmpty ? 'neutral' : 'positive'
-    },
-    {
-      title: 'Total Recovered / Collected',
-      value: `₹${Math.ceil(totalReceived).toLocaleString()}`,
-      change: isEmpty ? '0 EMIs Received' : `${emisCleared} EMIs Received`,
-      desc: isEmpty ? 'Zero collections recorded' : 'Realized collections',
-      icon: CheckCircle2,
-      trendType: emisCleared > 0 ? 'positive' : 'neutral'
-    },
-    {
-      title: 'Outstanding Principal & Balances',
-      value: `₹${Math.ceil(totalOutstanding).toLocaleString()}`,
-      change: isEmpty ? 'Zero Outstanding' : 'On Repayment Schedule',
-      desc: isEmpty ? 'No active loan debt' : 'Pending regular recovery',
-      icon: FileText,
-      trendType: 'neutral'
-    },
-    {
-      title: 'Active Borrower Accounts',
-      value: activeLoans,
-      change: isEmpty ? '0 Active Accounts' : 'Standard Asset (SMA 0)',
-      desc: isEmpty ? 'Awaiting initial application' : '0 Default risk flagged',
-      icon: TrendingUp,
-      trendType: isEmpty ? 'neutral' : 'positive'
-    }
-  ];
+  // Role-Differentiated KPI Cards
+  const kpiCards = isAdmin
+    ? [
+        {
+          title: 'Total Disbursed Capital',
+          value: `₹${Math.ceil(totalDisbursed).toLocaleString()}`,
+          change: isEmpty ? 'Fresh Database' : '+14.2% MoM',
+          desc: isEmpty ? 'Zero capital disbursed yet' : 'Active portfolio sanction',
+          icon: DollarSign,
+          trendType: isEmpty ? 'neutral' : 'positive'
+        },
+        {
+          title: 'Total Recovered / Collected',
+          value: `₹${Math.ceil(totalReceived).toLocaleString()}`,
+          change: isEmpty ? '0 EMIs Received' : `${emisCleared} EMIs Received`,
+          desc: isEmpty ? 'Zero collections recorded' : 'Realized collections',
+          icon: CheckCircle2,
+          trendType: emisCleared > 0 ? 'positive' : 'neutral'
+        },
+        {
+          title: 'Outstanding Principal & Balances',
+          value: `₹${Math.ceil(totalOutstanding).toLocaleString()}`,
+          change: isEmpty ? 'Zero Outstanding' : 'On Repayment Schedule',
+          desc: isEmpty ? 'No active loan debt' : 'Pending regular recovery',
+          icon: FileText,
+          trendType: 'neutral'
+        },
+        {
+          title: 'Active Borrower Accounts',
+          value: activeLoans,
+          change: isEmpty ? '0 Active Accounts' : 'Standard Asset (SMA 0)',
+          desc: isEmpty ? 'Awaiting initial application' : '0 Default risk flagged',
+          icon: TrendingUp,
+          trendType: isEmpty ? 'neutral' : 'positive'
+        }
+      ]
+    : [
+        {
+          title: 'Total Loan Applications',
+          value: totalLoans,
+          change: isEmpty ? 'Fresh Database' : 'Registered Files',
+          desc: isEmpty ? 'Zero applications logged' : 'Portfolio application intake',
+          icon: FileText,
+          trendType: isEmpty ? 'neutral' : 'positive'
+        },
+        {
+          title: 'Active Borrower Accounts',
+          value: activeLoans,
+          change: isEmpty ? '0 Active Accounts' : 'Standard Asset (SMA 0)',
+          desc: isEmpty ? 'Awaiting initial application' : 'Regular servicing accounts',
+          icon: Users,
+          trendType: isEmpty ? 'neutral' : 'positive'
+        },
+        {
+          title: 'Pending Sanction Approvals',
+          value: pendingApprovals,
+          change: pendingApprovals > 0 ? `${pendingApprovals} Pending Action` : 'Queue Clear',
+          desc: isManager ? 'Review & sanction decisions' : 'Awaiting managerial sign-off',
+          icon: Clock,
+          trendType: pendingApprovals > 0 ? 'positive' : 'neutral'
+        },
+        {
+          title: 'Cleared Repayment Installments',
+          value: emisCleared,
+          change: isEmpty ? '0 EMIs' : `${emisCleared} Collections`,
+          desc: 'Serviced borrower installments',
+          icon: CheckCircle2,
+          trendType: emisCleared > 0 ? 'positive' : 'neutral'
+        }
+      ];
 
   return (
     <div className="space-y-4">
       
-      {/* Executive CRM Header Bar */}
+      {/* Executive / Operational Header Bar */}
       <div className="crm-card p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 relative overflow-hidden">
         <div className="space-y-1 z-10 max-w-xl">
           <div className="flex items-center space-x-2">
             <span className="px-2 py-0.5 rounded-full text-[9px] font-medium uppercase tracking-wider bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
-              {settings?.branch_code || 'BR-NNL-001'} • Command Center
+              {settings?.branch_code || 'BR-NNL-001'} • {isAdmin ? 'Executive Command Center' : isManager ? 'Branch Manager Workspace' : 'Field Staff Operations'}
             </span>
             <span className={`h-1.5 w-1.5 rounded-full ${isEmpty ? 'bg-amber-400' : 'bg-emerald-500'}`}></span>
             <span className={`text-[10px] font-medium ${isEmpty ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
@@ -123,11 +175,13 @@ export default function DashboardPage() {
           </div>
 
           <h1 className="text-xl sm:text-2xl font-semibold text-slate-900 dark:text-white tracking-tight">
-            Executive Financial Dashboard
+            {isAdmin ? 'Executive Financial & P&L Dashboard' : 'Branch Operations & Servicing Dashboard'}
           </h1>
 
           <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-            Real-time microfinance portfolio monitoring, borrower KYC exposure, and daily repayment collection ledger.
+            {isAdmin 
+              ? 'Real-time microfinance portfolio monitoring, corporate profit/loss ledger, income/expense tracking, and repayment collections.' 
+              : 'Branch portfolio workflow, loan application processing pipeline, KYC verification, and daily installment recovery servicing.'}
           </p>
         </div>
 
@@ -147,6 +201,16 @@ export default function DashboardPage() {
             <Receipt className="h-3.5 w-3.5" />
             <span>Record EMI Payment</span>
           </Link>
+          {isAdmin && (
+            <Link
+              to="/total-profit-loss"
+              className="inline-flex items-center space-x-1.5 h-8 px-3 rounded-lg bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold transition-colors shadow-xs"
+              title="View Total Profit & Loss Executive Statement"
+            >
+              <Scale className="h-3.5 w-3.5" />
+              <span>Executive P&L</span>
+            </Link>
+          )}
         </div>
       </div>
 
@@ -175,7 +239,79 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* 4 Clean Executive KPI Cards */}
+      {/* ADMIN-ONLY: Executive Financial & Profit/Loss Command Strip */}
+      {isAdmin && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {/* Total Income */}
+          <div className="crm-card p-4 flex items-center justify-between bg-gradient-to-br from-emerald-500/10 via-emerald-500/5 to-transparent border-emerald-500/30">
+            <div className="space-y-1">
+              <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider block">
+                Total Operating Income
+              </span>
+              <h3 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+                ₹{Math.ceil(totalIncome).toLocaleString()}
+              </h3>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Loan fees, interest income & recoveries
+              </p>
+            </div>
+            <div className="h-11 w-11 rounded-xl bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 flex items-center justify-center shrink-0">
+              <Wallet className="h-5 w-5" />
+            </div>
+          </div>
+
+          {/* Total Expense */}
+          <div className="crm-card p-4 flex items-center justify-between bg-gradient-to-br from-amber-500/10 via-rose-500/5 to-transparent border-amber-500/30">
+            <div className="space-y-1">
+              <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider block">
+                Total Operating Expenses
+              </span>
+              <h3 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+                ₹{Math.ceil(totalExpense).toLocaleString()}
+              </h3>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Overheads, branch ops & disbursements
+              </p>
+            </div>
+            <div className="h-11 w-11 rounded-xl bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 flex items-center justify-center shrink-0">
+              <TrendingDown className="h-5 w-5" />
+            </div>
+          </div>
+
+          {/* Net Profit / Loss */}
+          <div className={`crm-card p-4 flex items-center justify-between bg-gradient-to-br ${netProfit >= 0 ? 'from-teal-500/10 border-teal-500/30' : 'from-rose-500/10 border-rose-500/30'} via-transparent to-transparent`}>
+            <div className="space-y-1">
+              <div className="flex items-center space-x-1.5">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
+                  Corporate Net Profit / Loss
+                </span>
+                <span className={`px-1.5 py-0.2 rounded text-[9px] font-black ${netProfit >= 0 ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300' : 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'}`}>
+                  {netProfit >= 0 ? 'PROFIT' : 'LOSS'}
+                </span>
+              </div>
+              <h3 className={`text-2xl font-black tracking-tight ${netProfit >= 0 ? 'text-teal-600 dark:text-teal-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                {netProfit >= 0 ? '+' : ''}₹{Math.ceil(netProfit).toLocaleString()}
+              </h3>
+              <div className="flex items-center space-x-2 pt-0.5">
+                <Link to="/reports" className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center space-x-0.5">
+                  <span>P&L Ledger</span>
+                  <ArrowRight className="h-3 w-3" />
+                </Link>
+                <span className="text-slate-300 dark:text-slate-700">•</span>
+                <Link to="/total-profit-loss" className="text-[11px] font-bold text-teal-600 dark:text-teal-400 hover:underline flex items-center space-x-0.5">
+                  <span>Executive Statement</span>
+                  <ArrowRight className="h-3 w-3" />
+                </Link>
+              </div>
+            </div>
+            <div className={`h-11 w-11 rounded-xl flex items-center justify-center shrink-0 border ${netProfit >= 0 ? 'bg-teal-500/20 text-teal-600 dark:text-teal-400 border-teal-500/30' : 'bg-rose-500/20 text-rose-600 dark:text-rose-400 border-rose-500/30'}`}>
+              <Scale className="h-5 w-5" />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 4 Clean Primary KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {kpiCards.map((card, index) => {
           const Icon = card.icon;
@@ -214,43 +350,68 @@ export default function DashboardPage() {
         })}
       </div>
 
-      {/* Portfolio Health & Collection Metrics */}
+      {/* Portfolio Health & Workflow Section */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3.5">
         
-        {/* Collection Efficiency Gauge */}
+        {/* Left Column: Health / Servicing Activity */}
         <div className="crm-card p-4 space-y-3">
           <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
             <div className="flex items-center space-x-2">
               <Activity className="h-4 w-4 text-emerald-600" />
-              <h3 className="font-medium text-slate-900 dark:text-white text-sm">Collection Health</h3>
+              <h3 className="font-medium text-slate-900 dark:text-white text-sm">
+                {isAdmin ? 'Collection Health & Recovery' : 'Servicing & Repayment Health'}
+              </h3>
             </div>
-            <span className={`text-xs font-medium px-2 py-0.5 rounded-md border ${
-              isEmpty 
-                ? 'text-slate-500 bg-slate-100 dark:bg-slate-800 dark:text-slate-400 border-slate-200 dark:border-slate-700' 
-                : 'text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-800'
-            }`}>
-              {isEmpty ? '0.0% (Empty Ledger)' : `${efficiencyRate}% Efficiency`}
-            </span>
+            {isAdmin ? (
+              <span className={`text-xs font-medium px-2 py-0.5 rounded-md border ${
+                isEmpty 
+                  ? 'text-slate-500 bg-slate-100 dark:bg-slate-800 dark:text-slate-400 border-slate-200 dark:border-slate-700' 
+                  : 'text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-800'
+              }`}>
+                {isEmpty ? '0.0% (Empty Ledger)' : `${efficiencyRate}% Efficiency`}
+              </span>
+            ) : (
+              <span className="text-xs font-medium px-2 py-0.5 rounded-md border text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/50 border-indigo-200 dark:border-indigo-800">
+                {activeLoans} Active Portfolios
+              </span>
+            )}
           </div>
 
           <div className="space-y-4 pt-1">
-            <div>
-              <div className="flex justify-between text-xs text-slate-600 dark:text-slate-300 mb-1.5">
-                <span className="font-medium">Monthly Collection Ratio</span>
-                <span className="font-bold text-slate-900 dark:text-white">
-                  ₹{Math.ceil(totalReceived).toLocaleString()} / ₹{Math.ceil(totalDemand).toLocaleString()}
-                </span>
+            {isAdmin ? (
+              <div>
+                <div className="flex justify-between text-xs text-slate-600 dark:text-slate-300 mb-1.5">
+                  <span className="font-medium">Monthly Collection Ratio</span>
+                  <span className="font-bold text-slate-900 dark:text-white">
+                    ₹{Math.ceil(totalReceived).toLocaleString()} / ₹{Math.ceil(totalDemand).toLocaleString()}
+                  </span>
+                </div>
+                <div className="w-full bg-slate-100 dark:bg-slate-800 rounded-full h-2.5 overflow-hidden">
+                  <div 
+                    className="h-2.5 rounded-full transition-all duration-500" 
+                    style={{ 
+                      background: 'var(--crm-gradient)',
+                      width: `${isEmpty ? 0 : Math.min(100, Math.max(0, efficiencyRate))}%` 
+                    }}
+                  />
+                </div>
               </div>
-              <div className="w-full bg-slate-100 dark:bg-slate-800 rounded-full h-2.5 overflow-hidden">
-                <div 
-                  className="h-2.5 rounded-full transition-all duration-500" 
-                  style={{ 
-                    background: 'var(--crm-gradient)',
-                    width: `${isEmpty ? 0 : Math.min(100, Math.max(0, efficiencyRate))}%` 
-                  }}
-                />
+            ) : (
+              <div>
+                <div className="flex justify-between text-xs text-slate-600 dark:text-slate-300 mb-1.5">
+                  <span className="font-medium">Cleared Repayments</span>
+                  <span className="font-bold text-slate-900 dark:text-white">
+                    {emisCleared} EMI Payments Received
+                  </span>
+                </div>
+                <div className="w-full bg-slate-100 dark:bg-slate-800 rounded-full h-2.5 overflow-hidden">
+                  <div 
+                    className="h-2.5 rounded-full transition-all duration-500 bg-emerald-500" 
+                    style={{ width: emisCleared > 0 ? '100%' : '0%' }}
+                  />
+                </div>
               </div>
-            </div>
+            )}
 
             <div>
               <div className="flex justify-between text-xs text-slate-600 dark:text-slate-300 mb-1.5">
@@ -269,12 +430,14 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Portfolio Summary Grid */}
+        {/* Right Column: Portfolio Sanction Summary Grid */}
         <div className="lg:col-span-2 crm-card p-6 space-y-4">
           <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
             <div className="flex items-center space-x-2">
               <PieChart className="h-4 w-4 text-indigo-600" />
-              <h3 className="font-medium text-slate-900 dark:text-white text-sm">Portfolio Sanction Summary</h3>
+              <h3 className="font-medium text-slate-900 dark:text-white text-sm">
+                {isAdmin ? 'Portfolio Sanction Summary' : 'Branch Pipeline & Operational Status'}
+              </h3>
             </div>
             <Link to="/loans" className="text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:underline flex items-center space-x-1">
               <span>View All Accounts</span>
@@ -295,12 +458,23 @@ export default function DashboardPage() {
                 {isEmpty ? 0 : avgTenure} Months
               </span>
             </div>
-            <div className="p-4 bg-slate-50 dark:bg-slate-900/60 rounded-lg border border-slate-200/80 dark:border-slate-800">
-              <span className="text-[10px] font-medium text-slate-400 uppercase tracking-wider block">Expected Interest Yield</span>
-              <span className="text-xl font-semibold text-slate-900 dark:text-white mt-1 block">
-                ₹{Math.ceil(expectedInterest).toLocaleString()}
-              </span>
-            </div>
+            
+            {/* Third Metric: Admin gets Expected Interest Yield; Manager/Staff gets Pending Workflow Queue */}
+            {isAdmin ? (
+              <div className="p-4 bg-slate-50 dark:bg-slate-900/60 rounded-lg border border-slate-200/80 dark:border-slate-800">
+                <span className="text-[10px] font-medium text-slate-400 uppercase tracking-wider block">Expected Interest Yield</span>
+                <span className="text-xl font-semibold text-teal-600 dark:text-teal-400 mt-1 block">
+                  ₹{Math.ceil(expectedInterest).toLocaleString()}
+                </span>
+              </div>
+            ) : (
+              <div className="p-4 bg-slate-50 dark:bg-slate-900/60 rounded-lg border border-slate-200/80 dark:border-slate-800">
+                <span className="text-[10px] font-medium text-slate-400 uppercase tracking-wider block">Sanction Action Queue</span>
+                <span className="text-xl font-semibold text-indigo-600 dark:text-indigo-400 mt-1 block">
+                  {pendingApprovals} Pending Review
+                </span>
+              </div>
+            )}
           </div>
         </div>
 

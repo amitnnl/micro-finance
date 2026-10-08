@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
-import { TrendingUp, ArrowUpRight, ArrowDownRight, PlusCircle, Loader2, X, Printer, FileText } from 'lucide-react';
+import { TrendingUp, ArrowUpRight, ArrowDownRight, PlusCircle, Loader2, X, Printer, FileText, Receipt, ArrowRight } from 'lucide-react';
+import ActionDropdown from '../components/ActionDropdown';
 
 export default function ReportsPage() {
   const navigate = useNavigate();
@@ -190,13 +191,38 @@ export default function ReportsPage() {
                         <td className={`py-2 px-3 font-extrabold ${netPl >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
                           {netPl >= 0 ? '+' : ''}₹{netPl.toLocaleString()}
                         </td>
-                        <td className="py-2 px-3 text-right">
-                          <button 
-                            onClick={() => navigate(`/emi-report?loan_id=${l.id}`)} 
-                            className="px-2 py-1 rounded-lg bg-teal-50 dark:bg-teal-900/30 hover:bg-teal-100 dark:hover:bg-teal-900/50 text-teal-700 dark:text-teal-300 font-bold text-[11px] border border-teal-200 dark:border-teal-700 transition-colors cursor-pointer"
-                          >
-                            Statement
-                          </button>
+                        <td className="py-2 px-3 text-right whitespace-nowrap">
+                          <ActionDropdown
+                            label="Actions"
+                            menuWidth={220}
+                            items={[
+                              {
+                                header: 'Borrower Ledger'
+                              },
+                              {
+                                label: 'Statement of Account',
+                                subLabel: 'View full repayment history',
+                                icon: FileText,
+                                iconColor: 'text-teal-600 dark:text-teal-400',
+                                onClick: () => navigate(`/emi-report?loan_id=${l.id}`)
+                              },
+                              {
+                                label: 'Collect EMI Payment',
+                                subLabel: 'Record new installment',
+                                icon: Receipt,
+                                iconColor: 'text-indigo-600 dark:text-indigo-400',
+                                onClick: () => navigate('/emis', { state: { preselectLoanId: l.id } })
+                              },
+                              { divider: true },
+                              {
+                                label: 'Loan Portfolio Dossier',
+                                subLabel: 'Open loan management dossier',
+                                icon: ArrowRight,
+                                iconColor: 'text-slate-500 dark:text-slate-400',
+                                onClick: () => navigate('/loans')
+                              }
+                            ]}
+                          />
                         </td>
                       </tr>
                     );

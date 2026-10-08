@@ -23,7 +23,7 @@ if (file_exists($distIndex)) {
     <html lang="en">
     <head>
         <meta charset="UTF-8">
-        <title>Kaspr Group Microfinance - Ready to Build</title>
+        <title>Microfinance Management System - Ready to Build</title>
         <style>
             body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
             .card { background: #1e293b; padding: 2.5rem; border-radius: 1rem; box-shadow: 0 20px 40px rgba(0,0,0,0.4); max-width: 550px; text-align: center; border: 1px solid #334155; }
@@ -34,7 +34,7 @@ if (file_exists($distIndex)) {
     </head>
     <body>
         <div class="card">
-            <h1>Kaspr Group of Microfinance</h1>
+            <h1>Microfinance Management System</h1>
             <p>The backend API is active and ready. Please build the frontend production distribution by running:</p>
             <p><code>npm run build</code></p>
             <p>inside the <code>frontend/</code> directory.</p>

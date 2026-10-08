@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import { useSettings } from '../context/SettingsContext';
 import { 
@@ -20,10 +20,15 @@ import {
  CreditCard,
  AlertCircle,
  FileCheck,
- MessageCircle
+ MessageCircle,
+ Calendar,
+ Receipt,
+ ArrowRight
 } from 'lucide-react';
+import ActionDropdown from '../components/ActionDropdown';
 
 export default function EmiReportPage() {
+ const navigate = useNavigate();
  const [searchParams] = useSearchParams();
  const targetLoanId = searchParams.get('loan_id');
  const { settings } = useSettings();
@@ -84,11 +89,73 @@ export default function EmiReportPage() {
  }
  };
 
+  const formatDocDate = (d) => {
+    if (!d) return 'N/A';
+    try {
+      const date = new Date(d);
+      if (isNaN(date.getTime())) return String(d);
+      return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    } catch {
+      return String(d);
+    }
+  };
+
+  const getLoanMilestones = (loan) => {
+    if (!loan) return { leadDate: null, applicationDate: null, approvalDate: null, disbursalDate: null };
+    const leadDate = loan.lead_date || loan.created_at || null;
+    const applicationDate = loan.application_date || loan.created_at || null;
+    const approvalDate = loan.approval_date || (loan.status === 'Approved' || loan.status === 'Active' || loan.status === 'Closed' ? (loan.updated_at || loan.created_at) : null);
+    const disbursalDate = loan.disbursement_date || (loan.status === 'Active' || loan.status === 'Closed' ? loan.disbursement_date : null);
+    return { leadDate, applicationDate, approvalDate, disbursalDate };
+  };
+
+  const renderLifecycleMilestoneStrip = (loan, currentStage = 'soa') => {
+    if (!loan) return null;
+    const milestones = getLoanMilestones(loan);
+    const stages = [
+      { key: 'lead', title: '1. Lead Origination', date: milestones.leadDate, desc: 'Inquiry / Lead Registered', done: !!milestones.leadDate },
+      { key: 'application', title: '2. Application Filed', date: milestones.applicationDate, desc: 'Dossier Filed', done: !!milestones.applicationDate },
+      { key: 'approval', title: '3. Sanction Approved', date: milestones.approvalDate, desc: 'Credit Sanction Granted', done: !!milestones.approvalDate },
+      { key: 'disbursal', title: '4. Funds Disbursed', date: milestones.disbursalDate, desc: 'Value Credited to A/C', done: !!milestones.disbursalDate }
+    ];
+
+    return (
+      <div className="rounded-xl border border-blue-200 dark:border-blue-900/60 bg-blue-50/50 dark:bg-blue-950/20 p-3 space-y-2 print:border-slate-300 print:bg-white print:p-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-1.5 text-xs font-black uppercase text-blue-900 dark:text-blue-200 print:text-black tracking-wider">
+            <Calendar className="h-3.5 w-3.5 text-blue-600 print:text-black" />
+            <span>Loan Lifecycle & Compliance Milestones</span>
+          </div>
+          <span className="text-[10px] font-bold text-blue-700 dark:text-blue-300 print:text-black bg-white dark:bg-blue-900/40 print:bg-slate-100 px-2 py-0.5 rounded border border-blue-200 dark:border-blue-800">
+            Audit Trail
+          </span>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {stages.map((st) => (
+            <div key={st.key} className={`rounded-lg p-2 border ${st.done ? 'bg-white dark:bg-slate-900/90 border-blue-200 dark:border-blue-800/80 shadow-xs' : 'bg-slate-50/60 dark:bg-slate-950/40 border-dashed border-slate-200 dark:border-slate-800'} print:bg-white print:border-slate-300`}>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[9.5px] font-bold text-slate-700 dark:text-slate-300 print:text-black">{st.title}</span>
+                <span className={`w-2 h-2 rounded-full ${st.done ? 'bg-emerald-500' : 'bg-slate-300'}`}></span>
+              </div>
+              <div className="font-extrabold text-[11px] text-slate-900 dark:text-white print:text-black">
+                {st.date ? formatDocDate(st.date) : 'Pending Stage'}
+              </div>
+              <div className="text-[9px] text-slate-500 dark:text-slate-400 print:text-slate-600 mt-0.5">
+                {st.desc}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   const handleWhatsAppSoaShare = (loan) => {
     if (!loan) return;
     const rawPhone = loan.phone || '';
     const cleanPhone = rawPhone.replace(/\D/g, '').slice(-10);
-    const instName = settings?.institution_name || 'Kaspr Microfinance';
+    const instName = settings?.institution_name || 'Microfinance Institution';
+    const m = getLoanMilestones(loan);
     const lines = [
       `*${instName.toUpperCase()}*`,
       `*LOAN STATEMENT OF ACCOUNT (SOA)*`,
@@ -103,6 +170,12 @@ export default function EmiReportPage() {
       `💳 *Monthly EMI:* Rs. ${parseFloat(loan.emi_amount || 0).toLocaleString()}`,
       `💵 *Total Amount Paid:* Rs. ${parseFloat(loan.amount_paid || loan.actual_received || 0).toLocaleString()}`,
       `⚠️ *Remaining Balance:* Rs. ${parseFloat(loan.remaining_balance || 0).toLocaleString()}`,
+      `━━━━━━━━━━━━━━━━━━━━━━`,
+      `*LIFECYCLE MILESTONES:*`,
+      m.leadDate ? `📅 Lead Date: ${formatDocDate(m.leadDate)}` : null,
+      m.applicationDate ? `📝 Application Date: ${formatDocDate(m.applicationDate)}` : null,
+      m.approvalDate ? `✅ Approval Date: ${formatDocDate(m.approvalDate)}` : null,
+      m.disbursalDate ? `💰 Disbursal Date: ${formatDocDate(m.disbursalDate)}` : null,
       `━━━━━━━━━━━━━━━━━━━━━━`,
       `_Official Statement from ${instName}._`
     ].filter(Boolean);
@@ -289,22 +362,48 @@ export default function EmiReportPage() {
                         <td className="py-2 px-3 text-slate-600 dark:text-slate-400 font-medium whitespace-nowrap">
                           {l.next_due_date || '24 Sep 2026'}
                         </td>
-                        <td className="py-2 px-3 text-right space-x-1 whitespace-nowrap">
-                          <button
-                            onClick={() => openSoaModal(l)}
-                            className="inline-flex items-center space-x-1 px-2 py-1 rounded-lg bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold shadow-sm cursor-pointer"
-                            title="View Statement of Account"
-                          >
-                            <FileText className="h-3 w-3" />
-                            <span>SOA</span>
-                          </button>
-                          <button
-                            onClick={() => handleWhatsAppSoaShare(l)}
-                            className="p-1 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition-colors cursor-pointer"
-                            title="Share Statement on WhatsApp"
-                          >
-                            <MessageCircle className="h-3.5 w-3.5" />
-                          </button>
+                        <td className="py-2 px-3 text-right whitespace-nowrap">
+                          <ActionDropdown
+                            label="Actions"
+                            menuWidth={230}
+                            items={[
+                              {
+                                header: 'Account Ledger'
+                              },
+                              {
+                                label: 'Statement of Account (SOA)',
+                                subLabel: 'Printable statement ledger',
+                                icon: FileText,
+                                iconColor: 'text-teal-600 dark:text-teal-400',
+                                onClick: () => openSoaModal(l)
+                              },
+                              {
+                                label: 'WhatsApp SOA Summary',
+                                subLabel: 'Send statement on WhatsApp',
+                                icon: MessageCircle,
+                                iconColor: 'text-emerald-600 dark:text-emerald-400',
+                                onClick: () => handleWhatsAppSoaShare(l)
+                              },
+                              { divider: true },
+                              {
+                                header: 'Repayment & Loans'
+                              },
+                              {
+                                label: 'Collect EMI Payment',
+                                subLabel: 'Record new installment receipt',
+                                icon: Receipt,
+                                iconColor: 'text-indigo-600 dark:text-indigo-400',
+                                onClick: () => navigate('/emis', { state: { preselectLoanId: l.id } })
+                              },
+                              {
+                                label: 'View Loan Application',
+                                subLabel: 'Open loan management dossier',
+                                icon: ArrowRight,
+                                iconColor: 'text-slate-500 dark:text-slate-400',
+                                onClick: () => navigate('/loans')
+                              }
+                            ]}
+                          />
                         </td>
                       </tr>
                     );
@@ -373,13 +472,13 @@ export default function EmiReportPage() {
                 {/* 1. Header Letterhead */}
                 <div className="text-center border-b-2 border-slate-900 dark:border-slate-200 print:border-black pb-3">
                   <h2 className="text-lg font-black text-slate-900 dark:text-white print:text-black tracking-tight uppercase">
-                    {settings.institution_name || 'Kaspr Group of Microfinance'}
+                    {settings.institution_name || 'Microfinance Institution'}
                   </h2>
                   <p className="text-xs font-semibold text-slate-600 dark:text-slate-300 print:text-slate-700">
                     {settings.tagline || settings.address || 'State Highway No.11, Kailash Nagar, Narnaul-123001 (Haryana)'}
                   </p>
                   <p className="text-[10.5px] text-slate-500 dark:text-slate-400 print:text-slate-600 font-medium">
-                    CIN: {settings.cin_number || 'U65929RJ2024NPL089123'} | Phone: {settings.phone || '+91 99910 95051'} | Email: {settings.email || 'support@kasprfinance.com'}
+                    CIN: {settings.cin_number || 'U65929RJ2024NPL089123'} | Phone: {settings.phone || '+91 99910 95051'} | Email: {settings.email || 'info@microfinance.com'}
                   </p>
 
                   <div className="mt-2.5 pt-2 border-t border-slate-200 dark:border-slate-700 print:border-slate-300 flex flex-wrap items-center justify-between text-[11px] gap-2">
@@ -433,6 +532,9 @@ export default function EmiReportPage() {
                     </div>
                   </div>
                 </div>
+
+                {/* 2B. LOAN LIFECYCLE MILESTONES (Lead, Application, Approval, Disbursal) */}
+                {renderLifecycleMilestoneStrip(selectedLoan, 'soa')}
 
                 {/* 3. BORROWER, CO-APPLICANT & GUARANTOR DETAILS (Complete Particulars) */}
                 <div className="space-y-1.5">
@@ -665,8 +767,20 @@ export default function EmiReportPage() {
                       <span className="font-bold text-slate-900 dark:text-white print:text-black">₹{totalContractValue.toLocaleString()}</span>
                     </div>
                     <div>
+                      <span className="text-[9.5px] text-slate-500 dark:text-slate-400 uppercase font-semibold block">Lead Date</span>
+                      <span className="font-bold text-slate-900 dark:text-white print:text-black">{formatDocDate(getLoanMilestones(selectedLoan).leadDate)}</span>
+                    </div>
+                    <div>
+                      <span className="text-[9.5px] text-slate-500 dark:text-slate-400 uppercase font-semibold block">Application Date</span>
+                      <span className="font-bold text-slate-900 dark:text-white print:text-black">{formatDocDate(getLoanMilestones(selectedLoan).applicationDate)}</span>
+                    </div>
+                    <div>
+                      <span className="text-[9.5px] text-slate-500 dark:text-slate-400 uppercase font-semibold block">Approval Date</span>
+                      <span className="font-bold text-indigo-600 dark:text-indigo-400 print:text-black">{formatDocDate(getLoanMilestones(selectedLoan).approvalDate)}</span>
+                    </div>
+                    <div>
                       <span className="text-[9.5px] text-slate-500 dark:text-slate-400 uppercase font-semibold block">Disbursed Date</span>
-                      <span className="font-bold text-slate-900 dark:text-white print:text-black">{selectedLoan.disbursement_date || selectedLoan.start_date || selectedLoan.next_due_date || 'N/A'}</span>
+                      <span className="font-bold text-emerald-600 dark:text-emerald-400 print:text-black">{formatDocDate(getLoanMilestones(selectedLoan).disbursalDate)}</span>
                     </div>
                   </div>
                 </div>
@@ -803,7 +917,7 @@ export default function EmiReportPage() {
                         {settings.signatory_name || 'Authorized Signatory'}
                       </p>
                       <p className="text-[9px] text-slate-500 dark:text-slate-400 print:text-slate-600 font-bold">
-                        {settings.signatory_title || 'Managing Director'}
+                        {settings.signatory_title || 'Authorized Signatory'}
                       </p>
                     </div>
                   </div>

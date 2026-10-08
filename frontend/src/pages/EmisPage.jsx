@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import api from '../services/api';
 import { useSettings } from '../context/SettingsContext';
+import ActionDropdown from '../components/ActionDropdown';
 import { 
   Receipt, 
   Search, 
@@ -27,6 +29,7 @@ import {
 } from 'lucide-react';
 
 export default function EmisPage() {
+  const location = useLocation();
   const { settings } = useSettings();
   const [activeLoans, setActiveLoans] = useState([]);
   const [statement, setStatement] = useState([]);
@@ -56,14 +59,25 @@ export default function EmisPage() {
   const [receiptData, setReceiptData] = useState(null);
   const [copiedLink, setCopiedLink] = useState(false);
 
+  const formatDocDate = (d) => {
+    if (!d) return 'N/A';
+    try {
+      const date = new Date(d);
+      if (isNaN(date.getTime())) return String(d);
+      return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    } catch {
+      return String(d);
+    }
+  };
+
   const handleWhatsAppShare = (data) => {
     if (!data) return;
     const rawPhone = data.phone || '';
     const cleanPhone = rawPhone.replace(/\D/g, '').slice(-10);
-    const instName = settings?.institution_name || 'Kaspr Microfinance';
+    const instName = settings?.institution_name || 'Microfinance Institution';
     const lines = [
       `*${instName.toUpperCase()}*`,
-      `*OFFICIAL EMI PAYMENT RECEIPT*`,
+      `*OFFICIAL EMI PAYMENT RECEIPT & VOUCHER*`,
       `━━━━━━━━━━━━━━━━━━━━━━`,
       `👤 *Borrower:* ${data.customer_name}`,
       `📄 *Receipt No:* ${data.receipt_no}`,
@@ -72,9 +86,25 @@ export default function EmisPage() {
       `🗓️ *Payment Date:* ${data.payment_date}`,
       `💳 *Payment Mode:* ${data.payment_mode}`,
       `━━━━━━━━━━━━━━━━━━━━━━`,
+      `*ITEMIZED PARTICULARS:*`,
+      data.items?.emi > 0 ? `• EMI Installment: Rs. ${parseFloat(data.items.emi).toLocaleString()}` : null,
+      data.items?.penal_charges > 0 ? `• Penal Charges: Rs. ${parseFloat(data.items.penal_charges).toLocaleString()}` : null,
+      data.items?.cbc > 0 ? `• CBC Return Charges: Rs. ${parseFloat(data.items.cbc).toLocaleString()}` : null,
+      data.items?.recovery_charges > 0 ? `• Legal Recovery: Rs. ${parseFloat(data.items.recovery_charges).toLocaleString()}` : null,
+      data.items?.advance_emi > 0 ? `• Advance EMI: Rs. ${parseFloat(data.items.advance_emi).toLocaleString()}` : null,
+      data.items?.current_penal > 0 ? `• Current Month Penal: Rs. ${parseFloat(data.items.current_penal).toLocaleString()}` : null,
+      data.items?.other_charges > 0 ? `• Other Charges: Rs. ${parseFloat(data.items.other_charges).toLocaleString()}` : null,
+      data.items?.foreclosure > 0 ? `• Foreclosure Payoff: Rs. ${parseFloat(data.items.foreclosure).toLocaleString()}` : null,
+      `━━━━━━━━━━━━━━━━━━━━━━`,
+      `*LOAN MILESTONES:*`,
+      data.lead_date ? `📅 Lead Date: ${formatDocDate(data.lead_date)}` : null,
+      data.application_date ? `📝 Application Date: ${formatDocDate(data.application_date)}` : null,
+      data.approval_date ? `✅ Sanction Date: ${formatDocDate(data.approval_date)}` : null,
+      data.disbursement_date ? `💰 Disbursal Date: ${formatDocDate(data.disbursement_date)}` : null,
+      `━━━━━━━━━━━━━━━━━━━━━━`,
       `✅ *Status:* Received & Recorded in Portfolio`,
       `_Thank you for your prompt repayment._`
-    ];
+    ].filter(Boolean);
     const message = lines.join('\n');
     const url = cleanPhone 
       ? `https://wa.me/91${cleanPhone}?text=${encodeURIComponent(message)}`
@@ -202,21 +232,27 @@ export default function EmisPage() {
       if (res.success) {
         const loans = res.data.loans || [];
         setActiveLoans(loans);
-        if (loans.length > 0 && !selectedLoanId) {
-          const first = loans[0];
-          setSelectedLoanId(first.id);
-          setSelectedLoan(first);
-          const auto = calculateAutomatedOverdue(first, paymentDate);
-          setItems({
-            emi: auto.overdueValues.emi,
-            penal_charges: auto.overdueValues.penal_charges,
-            cbc: auto.overdueValues.cbc,
-            recovery_charges: auto.overdueValues.recovery_charges,
-            advance_emi: 0,
-            current_penal: auto.overdueValues.current_penal,
-            other_charges: auto.overdueValues.other_charges,
-            foreclosure: 0
-          });
+        if (loans.length > 0) {
+          const preselected = location.state?.preselectLoanId 
+            ? loans.find(l => String(l.id) === String(location.state.preselectLoanId)) 
+            : null;
+          const target = preselected || (!selectedLoanId ? loans[0] : null);
+          if (target) {
+            setSelectedLoanId(target.id);
+            setSelectedLoan(target);
+            const auto = calculateAutomatedOverdue(target, paymentDate);
+            setItems({
+              emi: auto.overdueValues.emi,
+              penal_charges: auto.overdueValues.penal_charges,
+              cbc: auto.overdueValues.cbc,
+              recovery_charges: auto.overdueValues.recovery_charges,
+              advance_emi: 0,
+              current_penal: auto.overdueValues.current_penal,
+              other_charges: auto.overdueValues.other_charges,
+              foreclosure: 0
+            });
+            fetchStatement(target.id);
+          }
         }
       }
     } catch (err) {
@@ -273,8 +309,11 @@ export default function EmisPage() {
       const emiAmt = Math.ceil(parseFloat(items.emi || 0) + parseFloat(items.advance_emi || 0) + parseFloat(items.foreclosure || 0));
       const penAmt = Math.ceil(parseFloat(items.penal_charges || 0) + parseFloat(items.current_penal || 0) + parseFloat(items.cbc || 0) + parseFloat(items.recovery_charges || 0) + parseFloat(items.other_charges || 0));
       const totalPaid = Math.ceil(totalAmount);
+      const autoOverdueSnapshot = calculateAutomatedOverdue(selectedLoan, paymentDate);
 
+      const detailsTag = `[DETAILS:${JSON.stringify({ items, overdue: autoOverdueSnapshot.overdueValues })}]`;
       const itemNotes = [
+        detailsTag,
         items.emi > 0 && `EMI: ₹${items.emi}`,
         items.penal_charges > 0 && `Penal: ₹${items.penal_charges}`,
         items.cbc > 0 && `CBC: ₹${items.cbc}`,
@@ -304,13 +343,20 @@ export default function EmisPage() {
           agreement_no: selectedLoan.agreement_no,
           customer_id: selectedLoan.customer_id,
           phone: selectedLoan.phone,
+          lead_date: selectedLoan.lead_date || selectedLoan.created_at || null,
+          application_date: selectedLoan.application_date || selectedLoan.created_at || null,
+          approval_date: selectedLoan.approval_date || selectedLoan.created_at || null,
+          disbursement_date: selectedLoan.disbursement_date || selectedLoan.start_date || null,
           emi_amount: emiAmt,
           penalty_amount: penAmt,
           total_paid: totalPaid,
           items: { ...items },
+          overdue_items: { ...autoOverdueSnapshot.overdueValues },
+          total_overdue: autoOverdueSnapshot.totalOverdueDemand,
           payment_mode: paymentMode,
           payment_date: paymentDate,
-          remaining_balance: Math.max(0, Math.ceil(parseFloat(selectedLoan.balance_outstanding) - emiAmt))
+          remaining_balance: Math.max(0, Math.ceil(parseFloat(selectedLoan.balance_outstanding) - emiAmt)),
+          notes: notes || ''
         });
         setShowReceiptModal(true);
         setNotes('');
@@ -326,29 +372,96 @@ export default function EmisPage() {
 
   const handleOpenHistoricalReceipt = (st) => {
     if (!selectedLoan || !st) return;
+
+    let parsedItems = {
+      emi: parseFloat(st.emi_amount || 0),
+      penal_charges: parseFloat(st.penalty_amount || 0),
+      cbc: 0,
+      recovery_charges: 0,
+      advance_emi: 0,
+      current_penal: 0,
+      other_charges: 0,
+      foreclosure: 0
+    };
+    let parsedOverdue = {
+      emi: parseFloat(st.emi_amount || 0),
+      penal_charges: parseFloat(st.penalty_amount || 0),
+      cbc: 0,
+      recovery_charges: 0,
+      advance_emi: 0,
+      current_penal: 0,
+      other_charges: 0,
+      foreclosure: 0
+    };
+    let cleanNotes = '';
+
+    if (st.notes) {
+      const detailsMatch = st.notes.match(/\[DETAILS:(\{.*?\})\]/);
+      if (detailsMatch) {
+        try {
+          const parsed = JSON.parse(detailsMatch[1]);
+          if (parsed.items) parsedItems = { ...parsedItems, ...parsed.items };
+          if (parsed.overdue) parsedOverdue = { ...parsedOverdue, ...parsed.overdue };
+        } catch (e) {
+          console.warn('Could not parse receipt details JSON', e);
+        }
+      }
+
+      const parseAmt = (regex) => {
+        const m = st.notes.match(regex);
+        return m ? parseFloat(m[1].replace(/,/g, '')) || 0 : null;
+      };
+
+      const emiVal = parseAmt(/EMI:\s*₹?([0-9.,]+)/i);
+      if (emiVal !== null) parsedItems.emi = emiVal;
+
+      const penalVal = parseAmt(/(?:Penal|Penal Charges):\s*₹?([0-9.,]+)/i);
+      if (penalVal !== null) parsedItems.penal_charges = penalVal;
+
+      const cbcVal = parseAmt(/CBC:\s*₹?([0-9.,]+)/i);
+      if (cbcVal !== null) { parsedItems.cbc = cbcVal; parsedOverdue.cbc = cbcVal; }
+
+      const recVal = parseAmt(/Recovery:\s*₹?([0-9.,]+)/i);
+      if (recVal !== null) { parsedItems.recovery_charges = recVal; parsedOverdue.recovery_charges = recVal; }
+
+      const advVal = parseAmt(/Advance:\s*₹?([0-9.,]+)/i);
+      if (advVal !== null) parsedItems.advance_emi = advVal;
+
+      const currPenVal = parseAmt(/Curr(?:ent)? Penal:\s*₹?([0-9.,]+)/i);
+      if (currPenVal !== null) { parsedItems.current_penal = currPenVal; parsedOverdue.current_penal = currPenVal; }
+
+      const othVal = parseAmt(/Other:\s*₹?([0-9.,]+)/i);
+      if (othVal !== null) { parsedItems.other_charges = othVal; parsedOverdue.other_charges = othVal; }
+
+      const foreVal = parseAmt(/Foreclosure:\s*₹?([0-9.,]+)/i);
+      if (foreVal !== null) { parsedItems.foreclosure = foreVal; parsedOverdue.foreclosure = foreVal; }
+
+      cleanNotes = st.notes.replace(/\[DETAILS:(\{.*?\})\]\s*\|?\s*/, '').trim();
+    }
+
+    const totalOverdueDemand = Object.values(parsedOverdue).reduce((sum, v) => sum + (parseFloat(v) || 0), 0);
+
     setReceiptData({
       receipt_no: st.receipt_no,
-      customer_name: selectedLoan.customer_name,
-      loan_no: selectedLoan.loan_no,
-      agreement_no: selectedLoan.agreement_no,
-      customer_id: selectedLoan.customer_id,
-      phone: selectedLoan.phone,
+      customer_name: st.customer_name || selectedLoan.customer_name,
+      loan_no: st.loan_no || selectedLoan.loan_no,
+      agreement_no: st.agreement_no || selectedLoan.agreement_no,
+      customer_id: st.customer_id || selectedLoan.customer_id,
+      phone: st.phone || selectedLoan.phone,
+      lead_date: st.lead_date || selectedLoan.lead_date || selectedLoan.created_at || null,
+      application_date: st.application_date || selectedLoan.application_date || selectedLoan.created_at || null,
+      approval_date: st.approval_date || selectedLoan.approval_date || selectedLoan.created_at || null,
+      disbursement_date: st.disbursement_date || selectedLoan.disbursement_date || selectedLoan.start_date || null,
       emi_amount: parseFloat(st.emi_amount || 0),
       penalty_amount: parseFloat(st.penalty_amount || 0),
       total_paid: parseFloat(st.total_paid || 0),
-      items: {
-        emi: parseFloat(st.emi_amount || 0),
-        penal_charges: parseFloat(st.penalty_amount || 0),
-        cbc: 0,
-        recovery_charges: 0,
-        advance_emi: 0,
-        current_penal: 0,
-        other_charges: 0,
-        foreclosure: 0
-      },
+      items: parsedItems,
+      overdue_items: parsedOverdue,
+      total_overdue: totalOverdueDemand > 0 ? totalOverdueDemand : parseFloat(st.total_paid || 0),
       payment_mode: st.payment_mode || 'Cash',
       payment_date: st.payment_date,
-      remaining_balance: Math.max(0, Math.ceil(parseFloat(selectedLoan.balance_outstanding || 0)))
+      remaining_balance: Math.max(0, Math.ceil(parseFloat(selectedLoan.balance_outstanding || 0))),
+      notes: cleanNotes
     });
     setShowReceiptModal(true);
   };
@@ -413,6 +526,57 @@ export default function EmisPage() {
       shortLabel: 'Foreclosure Settlement',
       desc: 'Complete loan account payoff demand',
       overdue: autoOverdue.overdueValues.foreclosure 
+    },
+  ];
+
+  const voucherRows = [
+    { 
+      key: 'emi', 
+      label: 'EMI Installment', 
+      shortLabel: 'EMI Installment',
+      desc: 'Regular monthly installment due'
+    },
+    { 
+      key: 'penal_charges', 
+      label: 'Penal Charges (Delayed Repayment)', 
+      shortLabel: 'Penal Charges',
+      desc: 'Overdue period penalty interest'
+    },
+    { 
+      key: 'cbc', 
+      label: 'CBC (Cheque Bounce / NACH Return)', 
+      shortLabel: 'CBC (Bounce / NACH Return)',
+      desc: 'Mandate return service charge'
+    },
+    { 
+      key: 'recovery_charges', 
+      label: 'Recovery Charges (Legal Notice)', 
+      shortLabel: 'Recovery Charges (Legal)',
+      desc: 'Notice & recovery processing fee'
+    },
+    { 
+      key: 'advance_emi', 
+      label: 'Advance EMI', 
+      shortLabel: 'Advance EMI',
+      desc: 'Deposit for upcoming billing cycle'
+    },
+    { 
+      key: 'current_penal', 
+      label: 'Current Month Penal Charge', 
+      shortLabel: 'Current Month Penal Charge',
+      desc: 'Ongoing cycle delayed interest'
+    },
+    { 
+      key: 'other_charges', 
+      label: 'Other Incidental Charges', 
+      shortLabel: 'Other Charges',
+      desc: 'Documentation & reminder fee'
+    },
+    { 
+      key: 'foreclosure', 
+      label: 'Foreclosure (Full Payoff Settlement)', 
+      shortLabel: 'Foreclosure Settlement',
+      desc: 'Complete loan account payoff demand'
     },
   ];
 
@@ -717,7 +881,7 @@ export default function EmisPage() {
                   <div className="p-1.5 bg-white rounded-lg shadow-xs border border-slate-200 shrink-0">
                     <img
                       src={`https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(
-                        `upi://pay?pa=${settings?.upi_id || '9991095051@okbizaxis'}&pn=${encodeURIComponent(settings?.institution_name || 'Kaspr Microfinance')}&am=${totalAmount}&tn=${encodeURIComponent(`${selectedLoan.agreement_no || selectedLoan.loan_no} EMI`)}&cu=INR`
+                        `upi://pay?pa=${settings?.upi_id || '9991095051@okbizaxis'}&pn=${encodeURIComponent(settings?.institution_name || 'Microfinance Institution')}&am=${totalAmount}&tn=${encodeURIComponent(`${selectedLoan.agreement_no || selectedLoan.loan_no} EMI`)}&cu=INR`
                       )}`}
                       alt="UPI QR Code"
                       className="w-20 h-20 rounded"
@@ -800,7 +964,7 @@ export default function EmisPage() {
                       <th className="py-2.5 px-3 text-right">Penalty</th>
                       <th className="py-2.5 px-3 text-right">Total Paid</th>
                       <th className="py-2.5 px-3 text-center">Status</th>
-                      <th className="py-2.5 px-3 text-center">Voucher</th>
+                      <th className="py-2.5 px-3 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
@@ -822,15 +986,51 @@ export default function EmisPage() {
                               Received
                             </span>
                           </td>
-                          <td className="py-2 px-3 text-center">
-                            <button
-                              type="button"
-                              onClick={() => handleOpenHistoricalReceipt(st)}
-                              className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 hover:text-teal-600 transition-colors cursor-pointer"
-                              title="Print / View Receipt Voucher"
-                            >
-                              <Printer className="h-3.5 w-3.5" />
-                            </button>
+                          <td className="py-2 px-3 text-right whitespace-nowrap">
+                            <ActionDropdown
+                              label="Actions"
+                              menuWidth={210}
+                              items={[
+                                {
+                                  header: 'Receipt Voucher'
+                                },
+                                {
+                                  label: 'Print Voucher',
+                                  subLabel: `Receipt #${st.receipt_no}`,
+                                  icon: Printer,
+                                  iconColor: 'text-teal-600 dark:text-teal-400',
+                                  onClick: () => handleOpenHistoricalReceipt(st)
+                                },
+                                {
+                                  label: 'Share on WhatsApp',
+                                  subLabel: 'Send voucher on WhatsApp',
+                                  icon: MessageCircle,
+                                  iconColor: 'text-emerald-600 dark:text-emerald-400',
+                                  onClick: () => {
+                                    handleWhatsAppShare({
+                                      customer_name: selectedLoan?.customer_name || 'Borrower',
+                                      phone: selectedLoan?.phone,
+                                      receipt_no: st.receipt_no,
+                                      agreement_no: selectedLoan?.agreement_no || selectedLoan?.loan_no,
+                                      total_paid: st.total_paid,
+                                      payment_date: st.payment_date,
+                                      payment_mode: st.payment_mode,
+                                      items: { emi: st.emi_amount, penal_charges: st.penalty_amount }
+                                    });
+                                  }
+                                },
+                                { divider: true },
+                                {
+                                  label: 'Copy Receipt No',
+                                  subLabel: st.receipt_no,
+                                  icon: Copy,
+                                  iconColor: 'text-slate-400',
+                                  onClick: () => {
+                                    navigator.clipboard.writeText(st.receipt_no);
+                                  }
+                                }
+                              ]}
+                            />
                           </td>
                         </tr>
                       ))
@@ -872,7 +1072,7 @@ export default function EmisPage() {
               {/* Header Letterhead */}
               <div className="text-center border-b border-slate-200 dark:border-slate-700 print:border-slate-400 pb-2.5">
                 <h2 className="text-base font-black text-slate-900 dark:text-white print:text-black tracking-tight uppercase">
-                  {settings.institution_name || 'Kaspr Group of Microfinance'}
+                  {settings.institution_name || 'Microfinance Institution'}
                 </h2>
                 <p className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 print:text-slate-700">
                   {settings.tagline || settings.address || 'State Highway No.11, Kailash Nagar, Narnaul-123001 (Haryana)'}
@@ -910,33 +1110,140 @@ export default function EmisPage() {
                 </div>
               </div>
 
-              {/* Payment Breakdown Grid */}
-              <div className="bg-slate-50 dark:bg-slate-950 print:bg-white p-2.5 rounded-lg border border-slate-200 dark:border-slate-800 print:border-slate-300 text-[11px] space-y-2">
-                <div className="grid grid-cols-3 gap-2">
-                  <div>
-                    <span className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold block">EMI Installment</span>
-                    <span className="font-bold text-slate-900 dark:text-white print:text-black">₹{Math.ceil(parseFloat(receiptData.emi_amount || receiptData.total_paid)).toLocaleString()}</span>
+              {/* Loan Milestone Audit Strip */}
+              <div className="bg-blue-50/60 dark:bg-blue-950/30 print:bg-slate-50 p-2.5 rounded-lg border border-blue-200/80 dark:border-blue-900/50 print:border-slate-300">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-[9.5px] font-bold uppercase tracking-wider text-blue-900 dark:text-blue-200 print:text-black">
+                    Loan Lifecycle Milestone Audit
+                  </span>
+                  <span className="text-[9px] text-blue-700 dark:text-blue-300 print:text-slate-600 font-semibold bg-white dark:bg-blue-900/40 print:bg-white px-1.5 py-0.5 rounded border border-blue-200 dark:border-blue-800">
+                    Origination to Payout
+                  </span>
+                </div>
+                <div className="grid grid-cols-4 gap-1.5 text-center">
+                  <div className="bg-white dark:bg-slate-900 print:bg-white p-1 rounded border border-slate-200 dark:border-slate-800 print:border-slate-300">
+                    <span className="text-[8.5px] text-slate-500 uppercase block font-semibold">1. Lead Date</span>
+                    <span className="font-extrabold text-slate-800 dark:text-slate-200 print:text-black text-[10px]">{formatDocDate(receiptData.lead_date)}</span>
                   </div>
-                  <div>
-                    <span className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold block">Late Penalty / Fee</span>
-                    <span className="font-bold text-rose-600 print:text-rose-700">₹{Math.ceil(parseFloat(receiptData.penalty_amount || 0)).toLocaleString()}</span>
+                  <div className="bg-white dark:bg-slate-900 print:bg-white p-1 rounded border border-slate-200 dark:border-slate-800 print:border-slate-300">
+                    <span className="text-[8.5px] text-slate-500 uppercase block font-semibold">2. Application</span>
+                    <span className="font-extrabold text-slate-800 dark:text-slate-200 print:text-black text-[10px]">{formatDocDate(receiptData.application_date)}</span>
                   </div>
-                  <div>
-                    <span className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-semibold block">Payment Status</span>
-                    <span className="font-bold text-emerald-600 print:text-emerald-700">Confirmed Received</span>
+                  <div className="bg-white dark:bg-slate-900 print:bg-white p-1 rounded border border-slate-200 dark:border-slate-800 print:border-slate-300">
+                    <span className="text-[8.5px] text-slate-500 uppercase block font-semibold">3. Sanctioned</span>
+                    <span className="font-extrabold text-indigo-700 dark:text-indigo-300 print:text-black text-[10px]">{formatDocDate(receiptData.approval_date)}</span>
+                  </div>
+                  <div className="bg-white dark:bg-slate-900 print:bg-white p-1 rounded border border-slate-200 dark:border-slate-800 print:border-slate-300">
+                    <span className="text-[8.5px] text-slate-500 uppercase block font-semibold">4. Disbursed</span>
+                    <span className="font-extrabold text-emerald-700 dark:text-emerald-300 print:text-black text-[10px]">{formatDocDate(receiptData.disbursement_date)}</span>
                   </div>
                 </div>
-
-                {receiptData.items && (receiptData.items.cbc > 0 || receiptData.items.recovery_charges > 0 || receiptData.items.advance_emi > 0 || receiptData.items.foreclosure > 0 || receiptData.items.other_charges > 0) && (
-                  <div className="pt-2 border-t border-slate-200 dark:border-slate-700 print:border-slate-300 flex flex-wrap gap-2.5 text-[10.5px] text-slate-600 dark:text-slate-300">
-                    {receiptData.items.cbc > 0 && <span>CBC: <strong className="text-slate-800 dark:text-slate-100 print:text-black">₹{receiptData.items.cbc}</strong></span>}
-                    {receiptData.items.recovery_charges > 0 && <span>Legal Recovery: <strong className="text-slate-800 dark:text-slate-100 print:text-black">₹{receiptData.items.recovery_charges}</strong></span>}
-                    {receiptData.items.advance_emi > 0 && <span>Advance: <strong className="text-teal-700 dark:text-teal-300 print:text-black">₹{receiptData.items.advance_emi}</strong></span>}
-                    {receiptData.items.foreclosure > 0 && <span>Foreclosure: <strong className="text-purple-700 dark:text-purple-300 print:text-black">₹{receiptData.items.foreclosure}</strong></span>}
-                    {receiptData.items.other_charges > 0 && <span>Other Charges: <strong className="text-slate-800 dark:text-slate-100 print:text-black">₹{receiptData.items.other_charges}</strong></span>}
-                  </div>
-                )}
               </div>
+
+              {/* Itemized Particulars Ledger Table (Matches Entry Form Layout Exactly) */}
+              <div className="rounded-lg border border-slate-300 dark:border-slate-700 print:border-slate-400 overflow-hidden shadow-2xs">
+                {/* Section Header */}
+                <div className="bg-slate-100 dark:bg-slate-800 print:bg-slate-100 px-3 py-1.5 border-b border-slate-200 dark:border-slate-700 print:border-slate-400 flex items-center justify-between">
+                  <div className="flex items-center space-x-1.5">
+                    <Receipt className="h-3.5 w-3.5 text-teal-600 print:text-black" />
+                    <span className="text-[10.5px] font-black uppercase tracking-wider text-slate-800 dark:text-slate-100 print:text-black">
+                      Itemized Particulars
+                    </span>
+                  </div>
+                  <span className="text-[9px] font-bold text-slate-500 dark:text-slate-400 print:text-slate-700 uppercase tracking-wider">
+                    Schedule Demand vs Actual Collection
+                  </span>
+                </div>
+
+                <table className="w-full text-left border-collapse text-xs print:text-[10px]">
+                  <thead>
+                    <tr className="bg-slate-50 dark:bg-slate-900/60 print:bg-slate-50 text-slate-700 dark:text-slate-200 print:text-black text-[9.5px] font-extrabold uppercase tracking-wider border-b border-slate-200 dark:border-slate-700 print:border-slate-400">
+                      <th className="py-1 px-2.5 w-6 text-center">#</th>
+                      <th className="py-1 px-2.5">Item Description</th>
+                      <th className="py-1 px-2.5 text-right w-28 whitespace-nowrap">Overdue Demand (₹)</th>
+                      <th className="py-1 px-2.5 text-right w-28 whitespace-nowrap">Actuals Paid (₹)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800 print:divide-slate-300 bg-white dark:bg-slate-900 print:bg-white">
+                    {voucherRows.map((row, idx) => {
+                      const paidVal = Math.ceil(parseFloat(receiptData.items?.[row.key] || 0));
+                      const overdueVal = Math.ceil(parseFloat(receiptData.overdue_items?.[row.key] || 0));
+                      const isPaid = paidVal > 0;
+                      const hasOverdue = overdueVal > 0;
+
+                      return (
+                        <tr
+                          key={row.key}
+                          className={`transition-colors ${isPaid ? 'bg-emerald-50/40 dark:bg-emerald-950/20 print:bg-slate-50/70 font-medium' : ''}`}
+                        >
+                          <td className="py-1 px-2.5 text-center text-[9.5px] text-slate-400 print:text-slate-600 font-mono">
+                            {idx + 1}
+                          </td>
+                          <td className="py-1 px-2.5">
+                            <div className={`text-[10.5px] print:text-[10px] leading-tight ${isPaid ? 'font-bold text-slate-900 dark:text-white print:text-black' : 'text-slate-700 dark:text-slate-300 print:text-slate-800'}`}>
+                              {row.shortLabel}
+                            </div>
+                            <div className="text-[8.5px] text-slate-400 dark:text-slate-500 print:text-slate-600 leading-none mt-0.5">
+                              {row.desc}
+                            </div>
+                          </td>
+                          <td className="py-1 px-2.5 text-right font-mono text-[10.5px] print:text-[10px]">
+                            {hasOverdue ? (
+                              <span className="font-bold text-rose-600 dark:text-rose-400 print:text-black">
+                                ₹{overdueVal.toLocaleString()}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 print:text-slate-500">₹0</span>
+                            )}
+                          </td>
+                          <td className="py-1 px-2.5 text-right font-mono text-[10.5px] print:text-[10px]">
+                            {isPaid ? (
+                              <span className="font-black text-emerald-700 dark:text-emerald-400 print:text-black">
+                                ₹{paidVal.toLocaleString()}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 print:text-slate-500">₹0</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+
+                    {/* Total Summary Row */}
+                    <tr className="bg-slate-900 dark:bg-slate-950 print:bg-slate-100 text-white print:text-black font-extrabold border-t-2 border-slate-700 print:border-slate-400">
+                      <td colSpan="2" className="py-1.5 px-2.5 uppercase tracking-wider text-[10px] text-slate-200 print:text-black">
+                        Total Demand / Paid
+                      </td>
+                      <td className="py-1.5 px-2.5 text-right font-mono text-[11px] text-rose-300 print:text-black font-bold">
+                        ₹{Math.ceil(parseFloat(receiptData.total_overdue || receiptData.total_paid || 0)).toLocaleString()}
+                      </td>
+                      <td className="py-1.5 px-2.5 text-right font-mono text-xs text-emerald-400 print:text-black font-black">
+                        ₹{Math.ceil(parseFloat(receiptData.total_paid || 0)).toLocaleString()}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+
+                {/* Status & Loan Balances Footer */}
+                <div className="bg-slate-50 dark:bg-slate-950 print:bg-white px-3 py-1.5 border-t border-slate-200 dark:border-slate-800 print:border-slate-300 flex flex-wrap items-center justify-between text-[10px] gap-2">
+                  <div className="text-slate-600 dark:text-slate-300 print:text-slate-700">
+                    Remaining Outstanding Balance: <strong className="text-slate-900 dark:text-white print:text-black font-mono font-bold">₹{Math.ceil(parseFloat(receiptData.remaining_balance || 0)).toLocaleString()}</strong>
+                  </div>
+                  <div className="text-slate-600 dark:text-slate-300 print:text-slate-700">
+                    Mode: <strong className="text-slate-900 dark:text-white print:text-black font-semibold uppercase">{receiptData.payment_mode}</strong>
+                  </div>
+                  <div className="text-emerald-700 dark:text-emerald-400 print:text-black font-bold flex items-center gap-1">
+                    <Check className="h-3 w-3 inline text-emerald-600 print:text-black" /> Payment Reconciled & Receipted
+                  </div>
+                </div>
+              </div>
+
+              {receiptData.notes && (
+                <div className="text-[10px] text-slate-600 dark:text-slate-300 print:text-slate-800 bg-slate-50 dark:bg-slate-800/40 print:bg-slate-50 p-1.5 rounded border border-slate-200 dark:border-slate-700 print:border-slate-300">
+                  <span className="font-bold text-slate-700 dark:text-slate-200 print:text-black">Transaction Narration / Notes: </span>
+                  {receiptData.notes}
+                </div>
+              )}
 
               {/* Verification QR Code & Authorized Signature */}
               <div className="pt-2.5 flex justify-between items-end border-t border-slate-200 dark:border-slate-700 print:border-slate-400 text-[10px]">
@@ -960,7 +1267,7 @@ export default function EmisPage() {
                     {settings.signatory_name || 'Authorized Signature'}
                   </p>
                   <p className="text-[9px] text-slate-500 dark:text-slate-400 print:text-slate-600 font-bold">
-                    {settings.signatory_title || 'Managing Director'}
+                    {settings.signatory_title || 'Authorized Signatory'}
                   </p>
                 </div>
               </div>
@@ -971,7 +1278,23 @@ export default function EmisPage() {
               <button
                 type="button"
                 onClick={() => {
-                  const summary = `Receipt No: ${receiptData.receipt_no}\nAgreement: ${receiptData.agreement_no || receiptData.loan_no}\nAmount: Rs. ${receiptData.total_paid}\nDate: ${receiptData.payment_date}`;
+                  const summary = [
+                    `Receipt No: ${receiptData.receipt_no}`,
+                    `Agreement: ${receiptData.agreement_no || receiptData.loan_no}`,
+                    `Borrower: ${receiptData.customer_name}`,
+                    `Amount: Rs. ${receiptData.total_paid}`,
+                    `Date: ${receiptData.payment_date}`,
+                    `Mode: ${receiptData.payment_mode}`,
+                    '--- Itemized Breakdown ---',
+                    receiptData.items?.emi > 0 ? `EMI: Rs. ${receiptData.items.emi}` : null,
+                    receiptData.items?.penal_charges > 0 ? `Penal: Rs. ${receiptData.items.penal_charges}` : null,
+                    receiptData.items?.cbc > 0 ? `CBC: Rs. ${receiptData.items.cbc}` : null,
+                    receiptData.items?.recovery_charges > 0 ? `Recovery: Rs. ${receiptData.items.recovery_charges}` : null,
+                    receiptData.items?.advance_emi > 0 ? `Advance: Rs. ${receiptData.items.advance_emi}` : null,
+                    receiptData.items?.current_penal > 0 ? `Curr Penal: Rs. ${receiptData.items.current_penal}` : null,
+                    receiptData.items?.other_charges > 0 ? `Other: Rs. ${receiptData.items.other_charges}` : null,
+                    receiptData.items?.foreclosure > 0 ? `Foreclosure: Rs. ${receiptData.items.foreclosure}` : null
+                  ].filter(Boolean).join('\n');
                   navigator.clipboard.writeText(summary);
                   setCopiedLink(true);
                   setTimeout(() => setCopiedLink(false), 2000);

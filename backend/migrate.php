@@ -19,9 +19,9 @@ try {
 
     $defaultHash = '$2y$10$Q0rFQWNNitaIrHug8NdXE.pCMSH6KdjEXJJ0e6rfpp0yIhSor6gbu'; // admin123
     $fixAdmins = [
-        ['name' => 'Admin User', 'email' => 'admin@microfinance.com', 'phone' => '9876543210'],
-        ['name' => 'Kaspr Admin', 'email' => 'admin@kaspr.com', 'phone' => '9876543210']
+        ['name' => 'Admin User', 'email' => 'admin@microfinance.com', 'phone' => '9876543210']
     ];
+    try { $db->exec("DELETE FROM `users` WHERE `email` = 'admin@kaspr.com'"); } catch (Exception $e) {}
     foreach ($fixAdmins as $adm) {
         $st = $db->prepare("SELECT id, password FROM `users` WHERE `email` = :em LIMIT 1");
         $st->execute([':em' => $adm['email']]);

@@ -62,7 +62,7 @@ class UserController {
 
         // Prevent deleting primary superadmin email
         $userEmail = strtolower(trim($user['email'] ?? ''));
-        if ($userEmail === 'admin@microfinance.com' || $userEmail === 'admin@kaspr.com') {
+        if ($userEmail === 'admin@microfinance.com') {
             Response::error('The primary system administrator account cannot be deleted.', 403);
         }
 

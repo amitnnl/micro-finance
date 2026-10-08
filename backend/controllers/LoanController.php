@@ -46,13 +46,16 @@ class LoanController {
             'district' => 'District',
             'state' => 'State',
             'pin_code' => 'PIN Code',
-            'loan_purpose_title' => 'Loan Purpose',
             'loan_amount' => 'Loan Amount',
             'tenure_months' => 'Tenure Months',
             'bank_name' => 'Bank Name',
             'bank_account_no' => 'Bank Account Number',
             'bank_ifsc' => 'Bank IFSC Code'
         ];
+
+        if (empty($input['loan_purpose_title'])) {
+            $input['loan_purpose_title'] = 'Microfinance Loan';
+        }
 
         foreach ($requiredFields as $field => $label) {
             if (empty($input[$field])) {
@@ -70,9 +73,30 @@ class LoanController {
         Response::json(true, 'Loan Application created successfully', $result, 201);
     }
 
+    public function update() {
+        AuthHelper::requireRole(['admin', 'manager', 'staff']);
+        $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+        $id = (int)($input['id'] ?? $_GET['id'] ?? 0);
+        if ($id <= 0) {
+            Response::error('Invalid Loan ID', 400);
+        }
+
+        try {
+            $updated = $this->loanModel->update($id, $input);
+            Response::json(true, 'Loan Application updated successfully', ['loan' => $updated]);
+        } catch (Exception $e) {
+            $code = (strpos($e->getMessage(), 'approved') !== false || strpos($e->getMessage(), 'locked') !== false) ? 403 : 400;
+            Response::error($e->getMessage(), $code);
+        }
+    }
+
     public function dashboardStats() {
-        $stats = $this->loanModel->getStats();
-        Response::json(true, 'Dashboard statistics loaded', ['stats' => $stats]);
+        $user = AuthHelper::getUser();
+        $role = $user ? AuthHelper::normalizeRole($user['role'] ?? 'staff') : 'staff';
+        $isAdmin = ($role === 'admin');
+
+        $stats = $this->loanModel->getStats($isAdmin);
+        Response::json(true, 'Dashboard statistics loaded', ['stats' => $stats, 'is_admin' => $isAdmin]);
     }
 
     public function disburse() {
@@ -102,13 +126,14 @@ class LoanController {
         $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
         $id = (int)($input['id'] ?? 0);
         $notes = trim($input['notes'] ?? '');
+        $approvalDate = !empty($input['approval_date']) ? trim($input['approval_date']) : null;
 
         if ($id <= 0) {
             Response::error('Invalid Loan ID', 400);
         }
 
         try {
-            $this->loanModel->approve($id, $notes);
+            $this->loanModel->approve($id, $notes, $approvalDate);
             Response::json(true, 'Loan Application approved successfully. Ready for fund disbursement.');
         } catch (Exception $e) {
             Response::error($e->getMessage(), 400);
@@ -242,7 +267,6 @@ class LoanController {
             'District',
             'State',
             'PIN Code',
-            'Loan Purpose',
             'Sanctioned Principal',
             'Annual Interest Rate (%)',
             'Tenure (Months)',
@@ -253,6 +277,9 @@ class LoanController {
             'EMIs Received',
             'EMIs Pending',
             'Status',
+            'Lead Date',
+            'Application Date',
+            'Approval Date',
             'Disbursement Date',
             'Disbursement Mode',
             'Bank Name',
@@ -282,7 +309,6 @@ class LoanController {
                 $l['district'] ?? '',
                 $l['state'] ?? '',
                 $l['pin_code'] ?? '',
-                $l['loan_purpose_title'] ?? '',
                 $l['loan_amount'] ?? '',
                 $l['interest_rate'] ?? '',
                 $l['tenure_months'] ?? '',
@@ -293,6 +319,9 @@ class LoanController {
                 $l['received_count'] ?? 0,
                 $l['pending_count'] ?? 0,
                 $l['status'] ?? 'Active',
+                $l['lead_date'] ?? '',
+                $l['application_date'] ?? '',
+                $l['approval_date'] ?? '',
                 $l['disbursement_date'] ?? '',
                 $l['disbursement_mode'] ?? '',
                 $l['bank_name'] ?? '',
@@ -336,8 +365,10 @@ class LoanController {
             'loan_amount',
             'interest_rate',
             'tenure_months',
-            'loan_purpose_title',
             'status',
+            'lead_date',
+            'application_date',
+            'approval_date',
             'disbursement_date',
             'bank_name',
             'bank_account_no',
@@ -363,10 +394,13 @@ class LoanController {
             'Haryana',
             '123001',
             '50000',
-            '35',
-            '12',
-            'Animal Husbandry Loan',
+            '14.5',
+            '24',
+            'Microfinance Loan',
             'Active',
+            '2026-05-01',
+            '2026-05-05',
+            '2026-05-08',
             '2026-05-10',
             'State Bank of India',
             '30987654321',
@@ -392,10 +426,13 @@ class LoanController {
             'Haryana',
             '123401',
             '75000',
-            '35',
+            '14.5',
             '18',
-            'Kirana Retail Shop',
-            'Approved',
+            'Retail Shop Loan',
+            'Pending Approval',
+            '2026-06-01',
+            '2026-06-03',
+            '',
             '',
             'Punjab National Bank',
             '0890001234567890',

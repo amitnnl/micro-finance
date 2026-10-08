@@ -18,6 +18,7 @@ import {
   CheckCircle2,
   Info
 } from 'lucide-react';
+import ActionDropdown from '../components/ActionDropdown';
 
 export default function UsersPage() {
   const { user: currentUser } = useAuth();
@@ -75,7 +76,7 @@ export default function UsersPage() {
       alert('You cannot remove your own active administrator account.');
       return;
     }
-    const isPrimaryAdmin = ['admin@microfinance.com', 'admin@kaspr.com'].includes(usr.email?.toLowerCase());
+    const isPrimaryAdmin = usr.email?.toLowerCase() === 'admin@microfinance.com';
     if (isPrimaryAdmin) {
       alert('The primary system administrator account cannot be deleted.');
       return;
@@ -223,7 +224,7 @@ export default function UsersPage() {
                   users.map((usr) => {
                     const badge = getRoleBadge(usr.role);
                     const isSelf = usr.id === currentUser?.id;
-                    const isPrimary = ['admin@microfinance.com', 'admin@kaspr.com'].includes(usr.email?.toLowerCase());
+                    const isPrimary = usr.email?.toLowerCase() === 'admin@microfinance.com';
                     const isInactive = usr.status === 'inactive';
 
                     return (
@@ -258,33 +259,37 @@ export default function UsersPage() {
                             {isInactive ? 'Inactive' : 'Active'}
                           </span>
                         </td>
-                        <td className="py-2 px-3.5 text-right space-x-1 whitespace-nowrap">
+                        <td className="py-2 px-3.5 text-right whitespace-nowrap">
                           {!isSelf && !isPrimary ? (
-                            <>
-                              <button
-                                onClick={() => handleToggleStatus(usr)}
-                                disabled={actionLoadingId === usr.id}
-                                className={`inline-flex items-center space-x-1 px-2 py-1 rounded-md text-[11px] font-semibold border cursor-pointer transition-colors ${
-                                  isInactive 
-                                    ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border-emerald-300 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800' 
-                                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
-                                }`}
-                                title={isInactive ? 'Activate Account' : 'Deactivate Account'}
-                              >
-                                {isInactive ? 'Activate' : 'Deactivate'}
-                              </button>
-                              <button
-                                onClick={() => handleDeleteUser(usr)}
-                                disabled={actionLoadingId === usr.id}
-                                className="inline-flex items-center space-x-1 px-2 py-1 rounded-md text-[11px] font-semibold bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800 cursor-pointer transition-colors"
-                                title="Remove User Account"
-                              >
-                                <Trash2 className="h-3 w-3" />
-                                <span>Remove</span>
-                              </button>
-                            </>
+                            <ActionDropdown
+                              label="Actions"
+                              menuWidth={210}
+                              items={[
+                                {
+                                  header: 'Account Access'
+                                },
+                                {
+                                  label: isInactive ? 'Activate Account' : 'Deactivate Account',
+                                  subLabel: isInactive ? 'Grant system access' : 'Revoke staff login',
+                                  icon: isInactive ? CheckCircle2 : UserX,
+                                  iconColor: isInactive ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400',
+                                  onClick: () => handleToggleStatus(usr),
+                                  disabled: actionLoadingId === usr.id
+                                },
+                                { divider: true },
+                                {
+                                  label: 'Remove User Account',
+                                  subLabel: 'Permanently remove staff',
+                                  icon: Trash2,
+                                  iconColor: 'text-rose-600 dark:text-rose-400',
+                                  danger: true,
+                                  onClick: () => handleDeleteUser(usr),
+                                  disabled: actionLoadingId === usr.id
+                                }
+                              ]}
+                            />
                           ) : (
-                            <span className="text-[10px] text-slate-400 italic">
+                            <span className="text-[10px] text-slate-400 dark:text-slate-500 font-semibold italic px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800">
                               Protected
                             </span>
                           )}

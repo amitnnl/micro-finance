@@ -84,6 +84,8 @@ CREATE TABLE IF NOT EXISTS `loans` (
     `pending_count` INT DEFAULT 0,
     `next_due_date` DATE DEFAULT NULL,
     `status` VARCHAR(30) NOT NULL DEFAULT 'Pending Approval',
+    `lead_date` DATE DEFAULT NULL,
+    `application_date` DATE DEFAULT NULL,
     `approval_date` DATE DEFAULT NULL,
     `approval_notes` TEXT DEFAULT NULL,
     `disbursement_date` DATE DEFAULT NULL,
@@ -148,12 +150,13 @@ CREATE TABLE IF NOT EXISTS `appointments` (
     `aadhaar_number` VARCHAR(20) DEFAULT NULL,
     `loan_amount` DECIMAL(12,0) DEFAULT 0,
     `lead_date` DATE DEFAULT NULL,
-    `source_type` ENUM('Lead', 'Referral', 'Direct') DEFAULT 'Lead',
+    `source_type` VARCHAR(50) DEFAULT 'Direct',
+    `referral_name` VARCHAR(150) DEFAULT NULL,
     `email` VARCHAR(150) DEFAULT NULL,
     `address` TEXT DEFAULT NULL,
     `city` VARCHAR(100) DEFAULT NULL,
     `appointment_date` DATE DEFAULT NULL,
-    `status` ENUM('Pending', 'Approved', 'Rejected') DEFAULT 'Pending',
+    `status` VARCHAR(50) DEFAULT 'Pending',
     `reject_reason` TEXT DEFAULT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -168,7 +171,7 @@ CREATE TABLE IF NOT EXISTS `leads` (
     `city` VARCHAR(100) DEFAULT NULL,
     `loan_type` VARCHAR(100) DEFAULT 'Personal Loan',
     `amount` DECIMAL(12,0) DEFAULT 0,
-    `status` ENUM('Pending', 'Approved', 'Rejected') DEFAULT 'Pending',
+    `status` VARCHAR(50) DEFAULT 'Pending',
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -193,19 +196,18 @@ CREATE TABLE IF NOT EXISTS `settings` (
 
 -- Initial Seed Data: Default Admin Accounts (Password: admin123)
 INSERT INTO `users` (`name`, `email`, `phone`, `password`, `role`, `status`) VALUES
-('Admin User', 'admin@microfinance.com', '9876543210', '$2y$10$Q0rFQWNNitaIrHug8NdXE.pCMSH6KdjEXJJ0e6rfpp0yIhSor6gbu', 'admin', 'active'),
-('Kaspr Admin', 'admin@kaspr.com', '9876543210', '$2y$10$Q0rFQWNNitaIrHug8NdXE.pCMSH6KdjEXJJ0e6rfpp0yIhSor6gbu', 'admin', 'active')
+('Admin User', 'admin@microfinance.com', '9876543210', '$2y$10$Q0rFQWNNitaIrHug8NdXE.pCMSH6KdjEXJJ0e6rfpp0yIhSor6gbu', 'admin', 'active')
 ON DUPLICATE KEY UPDATE `password` = VALUES(`password`), `role` = 'admin', `status` = 'active';
 
 -- Default Settings
 INSERT INTO `settings` (`setting_key`, `setting_value`) VALUES
-('institution_name', 'Kaspr Group of Microfinance'),
-('tagline', 'State Highway No.11,Opp. KIA Show Room, Kailash Nagar, Narnaul-123001 (Haryana) INDIA'),
+('institution_name', 'Microfinance Institution'),
+('tagline', 'Registered Non-Banking Financial Company (NBFC - MFI)'),
 ('cin_number', 'U65929RJ2024NPL089123'),
-('branch_code', 'BR-NNL-001'),
+('branch_code', 'BR-001'),
 ('phone', '+91 99910 95051'),
-('email', 'support@kasprgroup.in'),
-('address', 'State Highway No.11, Opp. KIA Show Room, Kailash Nagar'),
+('email', 'info@microfinance.com'),
+('address', 'Main Branch Office'),
 ('city', 'Narnaul'),
 ('state', 'Haryana'),
 ('pincode', '123001'),
@@ -216,7 +218,7 @@ INSERT INTO `settings` (`setting_key`, `setting_value`) VALUES
 ('grace_period', '5'),
 ('max_loan_limit', '200000'),
 ('receipt_terms', 'All payments are non-refundable. Please keep this official receipt for future reference.'),
-('signatory_name', 'Karan Singh'),
-('signatory_title', 'Managing Director')
+('signatory_name', 'Authorized Signatory'),
+('signatory_title', 'Authorized Officer')
 ON DUPLICATE KEY UPDATE `setting_value` = VALUES(`setting_value`);
 

@@ -217,7 +217,7 @@ export default function PublicWebsitePage() {
             </div>
             <div>
               <div className="flex items-center space-x-2">
-                <span className="font-display font-black text-base sm:text-lg tracking-tight text-slate-900 dark:text-white">{settings.institution_name || 'Kaspr Group of Microfinance'}</span>
+                <span className="font-display font-black text-base sm:text-lg tracking-tight text-slate-900 dark:text-white">{settings.institution_name || 'Microfinance'}</span>
                 <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">NBFC MFI</span>
               </div>
               <p className="text-[10px] text-slate-500 dark:text-slate-400 tracking-wider">Credit Up To ₹{maxLimit.toLocaleString('en-IN')}</p>
@@ -938,7 +938,7 @@ export default function PublicWebsitePage() {
           <div className="flex items-center space-x-2.5">
             <Shield className="h-5 w-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
             <div>
-              <span className="font-display font-black text-slate-900 dark:text-white text-sm sm:text-base">{settings.institution_name || 'Kaspr Group of Microfinance'}</span>
+              <span className="font-display font-black text-slate-900 dark:text-white text-sm sm:text-base">{settings.institution_name || 'Microfinance'}</span>
               <p className="text-[10px] text-slate-500 dark:text-slate-400">{settings.tagline || 'Regulated Microfinance Lending Service'} • Limit ₹{maxLimit.toLocaleString('en-IN')}</p>
             </div>
           </div>

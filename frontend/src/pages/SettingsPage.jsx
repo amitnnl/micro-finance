@@ -26,13 +26,13 @@ export default function SettingsPage() {
   const [savedSuccess, setSavedSuccess] = useState(false);
 
   const [settings, setSettings] = useState(globalSettings || {
-    institution_name: 'Kaspr Group of Microfinance',
-    tagline: 'State Highway No.11,Opp. KIA Show Room, Kailash Nagar, Narnaul-123001 (Haryana) INDIA',
+    institution_name: 'Microfinance Institution',
+    tagline: 'Registered Non-Banking Financial Company (NBFC - MFI)',
     cin_number: 'U65929RJ2024NPL089123',
-    branch_code: 'BR-NNL-001',
+    branch_code: 'BR-001',
     phone: '+91 99910 95051',
-    email: 'support@kasprgroup.in',
-    address: 'State Highway No.11, Opp. KIA Show Room, Kailash Nagar',
+    email: 'info@microfinance.com',
+    address: 'Main Branch Office',
     city: 'Narnaul',
     state: 'Haryana',
     pincode: '123001',
@@ -43,8 +43,8 @@ export default function SettingsPage() {
     grace_period: '5',
     max_loan_limit: '200000',
     receipt_terms: 'All payments are non-refundable. Please keep this official receipt for future reference.',
-    signatory_name: 'Karan Singh',
-    signatory_title: 'Managing Director'
+    signatory_name: 'Authorized Signatory',
+    signatory_title: 'Authorized Officer'
   });
 
   // Sync state when globalSettings loads or updates
@@ -233,7 +233,7 @@ export default function SettingsPage() {
                       required
                       value={settings.institution_name}
                       onChange={(e) => handleChange('institution_name', e.target.value)}
-                      placeholder="e.g. Kaspr Group of Microfinance"
+                      placeholder="e.g. Microfinance Institution Ltd"
                       className="w-full light-input font-bold"
                     />
                   </div>
@@ -313,7 +313,7 @@ export default function SettingsPage() {
                       type="email"
                       value={settings.email}
                       onChange={(e) => handleChange('email', e.target.value)}
-                      placeholder="support@kasprgroup.in"
+                      placeholder="info@yourcompany.com"
                       className="w-full light-input"
                     />
                   </div>
@@ -519,7 +519,7 @@ export default function SettingsPage() {
                       type="text"
                       value={settings.signatory_title}
                       onChange={(e) => handleChange('signatory_title', e.target.value)}
-                      placeholder="Managing Director"
+                      placeholder="Authorized Signatory"
                       className="w-full light-input"
                     />
                   </div>

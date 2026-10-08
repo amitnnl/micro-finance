@@ -20,8 +20,12 @@ import {
   FileSpreadsheet,
   FileText,
   Check,
-  AlertCircle
+  AlertCircle,
+  Phone,
+  MessageCircle,
+  RotateCcw
 } from 'lucide-react';
+import ActionDropdown from '../components/ActionDropdown';
 
 export default function AppointmentsPage() {
   const navigate = useNavigate();
@@ -61,7 +65,8 @@ export default function AppointmentsPage() {
  aadhaar_number: '',
  loan_amount: '',
  lead_date: new Date().toISOString().split('T')[0],
- source_type: 'Lead',
+ source_type: 'Direct',
+ referral_name: '',
  email: '',
  address: ''
  });
@@ -91,6 +96,10 @@ export default function AppointmentsPage() {
       alert('Microfinance Limit: Lead requested loan amount cannot exceed ₹2,00,000 (2 Lakhs maximum).');
       return;
     }
+    if (formData.source_type === 'Referral' && !formData.referral_name?.trim()) {
+      alert('Please enter the Referral Name for referral source.');
+      return;
+    }
     setSubmitting(true);
     try {
       const res = await api.post('appointments', formData);
@@ -102,7 +111,8 @@ export default function AppointmentsPage() {
           aadhaar_number: '',
           loan_amount: '',
           lead_date: new Date().toISOString().split('T')[0],
-          source_type: 'Lead',
+          source_type: 'Direct',
+          referral_name: '',
           email: '',
           address: ''
         });
@@ -121,17 +131,21 @@ export default function AppointmentsPage() {
       if (res.success) {
         setShowRejectModal(false);
         setRejectReason('');
-        if (status === 'Approved') {
+        if (status === 'Approved' && aptObj) {
           const targetApt = aptObj || appointments.find((a) => a.id === id);
           if (targetApt) {
             navigate('/loans', {
               state: {
                 prefillLead: {
+                  id: targetApt.id,
+                  lead_id: targetApt.id,
                   name: targetApt.client_name,
                   phone: targetApt.phone,
                   amount: targetApt.loan_amount,
                   city: targetApt.address || targetApt.city,
-                  aadhaar: targetApt.aadhaar_number
+                  aadhaar: targetApt.aadhaar_number,
+                  lead_date: targetApt.lead_date || targetApt.created_at?.split(' ')[0] || new Date().toISOString().split('T')[0],
+                  reference_name: targetApt.referral_name || ''
                 }
               }
             });
@@ -192,6 +206,33 @@ export default function AppointmentsPage() {
     }
 
     return { headers, rows };
+  };
+
+  const getField = (row, candidates, fallback = '') => {
+    if (!row) return fallback;
+    for (const c of candidates) {
+      if (row[c] !== undefined && row[c] !== null && String(row[c]).trim() !== '') {
+        return String(row[c]).trim();
+      }
+    }
+    const keys = Object.keys(row);
+    for (const k of keys) {
+      const clean = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+      for (const c of candidates) {
+        const target = c.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (clean === target && row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== '') {
+          return String(row[k]).trim();
+        }
+      }
+    }
+    return fallback;
+  };
+
+  const getAmount = (row, candidates, defaultAmt = 50000) => {
+    const raw = getField(row, candidates, '');
+    if (!raw) return defaultAmt;
+    const clean = parseFloat(String(raw).replace(/[^0-9.]/g, ''));
+    return isNaN(clean) || clean <= 0 ? defaultAmt : Math.ceil(clean);
   };
 
   const handleProcessCsvFile = (file) => {
@@ -284,9 +325,9 @@ export default function AppointmentsPage() {
       console.error('Export CSV error:', err);
       // Fallback: client-side CSV generation
       try {
-        let csvContent = '\uFEFFLead No,Client Name,Mobile Phone,Aadhaar Number,Loan Amount,Source Type,Lead Date,Address / City,Status,Created At\n';
+        let csvContent = '\uFEFFLead / Apt No,Client Name,Mobile Phone,Aadhaar Number,Loan Amount (Rs),Lead Date,Source Type,Referral Name,Email Address,Address,City / Town,Appointment Date,Status,Created At\n';
         filteredAppointments.forEach(apt => {
-          csvContent += `"${apt.appointment_no || ''}","${apt.client_name || ''}","${apt.phone || ''}","${apt.aadhaar_number || ''}","${apt.loan_amount || 0}","${apt.source_type || 'Lead'}","${apt.lead_date || ''}","${apt.address || apt.city || ''}","${apt.status || 'Pending'}","${apt.created_at || ''}"\n`;
+          csvContent += `"${apt.appointment_no || ''}","${apt.client_name || ''}","${apt.phone || ''}","${apt.aadhaar_number || ''}","${apt.loan_amount || 0}","${apt.lead_date || ''}","${apt.source_type || 'Direct'}","${apt.referral_name || ''}","${apt.email || ''}","${apt.address || ''}","${apt.city || ''}","${apt.appointment_date || ''}","${apt.status || 'Pending'}","${apt.created_at || ''}"\n`;
         });
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
         const url = window.URL.createObjectURL(blob);
@@ -325,7 +366,7 @@ export default function AppointmentsPage() {
       link.remove();
       window.URL.revokeObjectURL(url);
     } catch (err) {
-      const sampleText = '\uFEFFclient_name,phone,aadhaar_number,loan_amount,lead_date,source_type,email,address,status\nRAMESH SHARMA,9876543210,123456789012,50000,2026-10-04,Lead,ramesh@example.com,VILL SEKA MAHENDERGARH,Pending\nSUNITA DEVI,9812345678,987654321098,75000,2026-10-04,Referral,sunita@example.com,NARNAUL,Pending\n';
+      const sampleText = '\uFEFFclient_name,phone,aadhaar_number,loan_amount,lead_date,source_type,referral_name,email,address,status\nRAMESH SHARMA,9876543210,123456789012,50000,2026-10-04,Direct,,ramesh@example.com,VILL SEKA MAHENDERGARH,Pending\nSUNITA DEVI,9812345678,987654321098,75000,2026-10-04,Referral,ANIL VERMA,sunita@example.com,NARNAUL,Pending\n';
       const blob = new Blob([sampleText], { type: 'text/csv;charset=utf-8;' });
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -362,7 +403,13 @@ export default function AppointmentsPage() {
      String(apt.address || '').toLowerCase().includes(q) ||
      String(apt.city || '').toLowerCase().includes(q)
    );
-   const matchesStatus = !statusFilter || apt.status === statusFilter;
+   const matchesStatus = !statusFilter || (
+     statusFilter === 'Draft'
+       ? (apt.status === 'Draft' || apt.status === 'Pending' || !apt.status)
+       : statusFilter === 'Approved'
+       ? (apt.status === 'Approved' || apt.status === 'Confirmed')
+       : apt.status === statusFilter
+   );
    return matchesSearch && matchesStatus;
  });
 
@@ -472,8 +519,8 @@ export default function AppointmentsPage() {
               className="w-full light-input font-bold text-xs"
             >
               <option value="">All Statuses</option>
-              <option value="Pending">Pending</option>
-              <option value="Approved">Approved</option>
+              <option value="Draft">Draft (Pending)</option>
+              <option value="Approved">Approved / Confirmed</option>
  <option value="Completed">Completed</option>
  <option value="Rejected">Rejected</option>
  </select>
@@ -520,10 +567,21 @@ export default function AppointmentsPage() {
  <td className="py-2 px-2.5 font-black text-emerald-700">
  ₹{parseFloat(apt.loan_amount || 200000).toLocaleString()}
  </td>
- <td className="py-2 px-2.5 font-extrabold uppercase">
- <span className="bg-teal-50 text-teal-900 px-2 py-0.5 rounded-md border border-teal-200 text-[10px]">
- {apt.source_type || 'KARAN'}
+ <td className="py-2 px-2.5">
+ <div className="flex flex-col gap-0.5">
+ <span className={`px-2 py-0.5 rounded-md border text-[10px] uppercase font-black inline-block w-fit ${
+ (apt.source_type || '').toLowerCase() === 'referral'
+ ? 'bg-purple-50 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300 border-purple-200 dark:border-purple-800'
+ : 'bg-teal-50 text-teal-900 dark:bg-teal-950/60 dark:text-teal-300 border-teal-200 dark:border-teal-800'
+ }`}>
+ {apt.source_type || 'Direct'}
  </span>
+ {apt.source_type === 'Referral' && apt.referral_name && (
+ <span className="text-[10px] text-slate-600 dark:text-slate-300 font-semibold truncate max-w-[130px]" title={`Referral: ${apt.referral_name}`}>
+ Ref: {apt.referral_name}
+ </span>
+ )}
+ </div>
  </td>
  <td className="py-2 px-2.5 text-slate-600 dark:text-slate-300 font-medium">{apt.lead_date || '12 Nov 1980'}</td>
  <td className="py-2 px-2.5 text-slate-600 dark:text-slate-300 uppercase">{apt.address || apt.city || 'VILL SEKA'}</td>
@@ -531,48 +589,135 @@ export default function AppointmentsPage() {
  {apt.created_at ? new Date(apt.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '24 Jul 2026, 04:17 PM'}
  </td>
  <td className="py-2 px-2.5">
- <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
- apt.status === 'Approved'
- ? 'bg-teal-100 text-teal-900 border border-teal-300'
- : apt.status === 'Completed'
- ? 'bg-slate-200 text-slate-900 dark:text-white border border-slate-300'
- : apt.status === 'Rejected'
- ? 'bg-rose-100 text-rose-900 border border-rose-300'
- : 'bg-emerald-100 text-emerald-900 border border-emerald-300'
- }`}>
- {apt.status}
- </span>
+   {(() => {
+     const isDraft = apt.status === 'Draft' || apt.status === 'Pending' || !apt.status;
+     const isApproved = apt.status === 'Approved' || apt.status === 'Confirmed';
+     return (
+       <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+         isApproved
+           ? 'bg-teal-100 text-teal-900 border border-teal-300 dark:bg-teal-950/60 dark:text-teal-300 dark:border-teal-800'
+           : apt.status === 'Completed'
+           ? 'bg-slate-200 text-slate-900 dark:bg-slate-800 dark:text-white border border-slate-300 dark:border-slate-700'
+           : apt.status === 'Rejected'
+           ? 'bg-rose-100 text-rose-900 border border-rose-300 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-800'
+           : 'bg-amber-100 text-amber-900 border border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800'
+       }`}>
+         {isApproved ? 'Approved' : apt.status === 'Completed' ? 'Completed' : apt.status === 'Rejected' ? 'Rejected' : 'Draft'}
+       </span>
+     );
+   })()}
  </td>
  <td className="py-2 px-2.5 text-slate-400 italic">{apt.reject_reason || '-'}</td>
- <td className="py-2 px-2.5 text-right whitespace-nowrap space-x-1">
- {apt.status === 'Approved' && (
-   <button
-     onClick={() => navigate('/loans', { state: { prefillLead: { name: apt.client_name, phone: apt.phone, amount: apt.loan_amount, city: apt.address || apt.city } } })}
-     className="inline-flex items-center space-x-1 px-3 py-1.5 rounded-xl bg-teal-50 text-teal-700 hover:bg-teal-100 border border-teal-200 transition-all font-bold text-xs cursor-pointer"
-     title="Convert to 6-Step Loan Application"
-   >
-     <span>Open Application</span>
-     <ArrowRight className="h-3.5 w-3.5" />
-   </button>
- )}
-                  {apt.status === 'Pending' && (
-                    <>
-                      <button
-                        onClick={() => handleStatusUpdate(apt.id, 'Approved', '', apt)}
-                        className="p-2 rounded-xl bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition-all cursor-pointer"
-                        title="Approve Lead & Open Application"
-                      >
-                        <CheckCircle2 className="h-4 w-4" />
-                      </button>
-                      <button
-                        onClick={() => { setSelectedAptId(apt.id); setShowRejectModal(true); }}
-                        className="p-2 rounded-xl bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 transition-all cursor-pointer"
-                        title="Reject Lead"
-                      >
-                        <XCircle className="h-4 w-4" />
-                      </button>
-                    </>
-                  )}
+ <td className="py-2 px-2.5 text-right whitespace-nowrap">
+   {(() => {
+     const isDraft = apt.status === 'Draft' || apt.status === 'Pending' || !apt.status;
+     const isApproved = apt.status === 'Approved' || apt.status === 'Confirmed';
+     return (
+       <ActionDropdown
+         label="Actions"
+         menuWidth={240}
+         items={[
+           isApproved && {
+             header: 'Loan Origination'
+           },
+           isApproved && {
+             label: 'Open Application',
+             subLabel: '6-step loan application flow',
+             icon: ArrowRight,
+             iconColor: 'text-teal-600 dark:text-teal-400',
+             badge: 'Sanction',
+             badgeColor: 'bg-teal-100 text-teal-800 dark:bg-teal-950 dark:text-teal-300',
+             onClick: () => navigate('/loans', {
+               state: {
+                 prefillLead: {
+                   id: apt.id,
+                   lead_id: apt.id,
+                   name: apt.client_name,
+                   phone: apt.phone,
+                   amount: apt.loan_amount,
+                   city: apt.address || apt.city,
+                   aadhaar: apt.aadhaar_number,
+                   lead_date: apt.lead_date || apt.created_at?.split(' ')[0] || new Date().toISOString().split('T')[0],
+                   reference_name: apt.referral_name || ''
+                 }
+               }
+             })
+           },
+           isApproved && {
+             label: 'Revert to Draft',
+             subLabel: 'Move back to unconfirmed draft',
+             icon: RotateCcw,
+             iconColor: 'text-slate-500 dark:text-slate-400',
+             onClick: () => handleStatusUpdate(apt.id, 'Pending', '', null)
+           },
+           isDraft && {
+             header: 'Draft Application'
+           },
+           isDraft && {
+             label: 'Open Loan Application',
+             subLabel: 'Fill 6-step form in draft',
+             icon: ArrowRight,
+             iconColor: 'text-amber-600 dark:text-amber-400',
+             badge: 'Draft',
+             badgeColor: 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300',
+             onClick: () => navigate('/loans', {
+               state: {
+                 prefillLead: {
+                   id: apt.id,
+                   lead_id: apt.id,
+                   name: apt.client_name,
+                   phone: apt.phone,
+                   amount: apt.loan_amount,
+                   city: apt.address || apt.city,
+                   aadhaar: apt.aadhaar_number,
+                   lead_date: apt.lead_date || apt.created_at?.split(' ')[0] || new Date().toISOString().split('T')[0],
+                   reference_name: apt.referral_name || ''
+                 }
+               }
+             })
+           },
+           isDraft && {
+             label: 'Confirm Lead',
+             subLabel: 'Verify & approve lead inquiry',
+             icon: CheckCircle2,
+             iconColor: 'text-teal-600 dark:text-teal-400',
+             badge: 'Confirm',
+             badgeColor: 'bg-teal-100 text-teal-800 dark:bg-teal-950 dark:text-teal-300',
+             onClick: () => handleStatusUpdate(apt.id, 'Approved', '', null)
+           },
+           isDraft && {
+             label: 'Reject Lead',
+             subLabel: 'Decline with reason notes',
+             icon: XCircle,
+             iconColor: 'text-rose-600 dark:text-rose-400',
+             danger: true,
+             onClick: () => { setSelectedAptId(apt.id); setShowRejectModal(true); }
+           },
+           { divider: true },
+           { header: 'Direct Contact' },
+           apt.phone && {
+             label: 'WhatsApp Client',
+             subLabel: `Chat with ${apt.phone}`,
+             icon: MessageCircle,
+             iconColor: 'text-emerald-600 dark:text-emerald-400',
+             onClick: () => {
+               const cleanPhone = (apt.phone || '').replace(/\D/g, '').slice(-10);
+               window.open(`https://wa.me/91${cleanPhone}?text=${encodeURIComponent(`Hello ${apt.client_name}, regarding your appointment with us...`)}`, '_blank');
+             }
+           },
+           apt.phone && {
+             label: 'Call Client',
+             subLabel: apt.phone,
+             icon: Phone,
+             iconColor: 'text-sky-600 dark:text-sky-400',
+             onClick: () => {
+               window.open(`tel:${apt.phone}`, '_self');
+             }
+           }
+         ].filter(Boolean)}
+       />
+     );
+   })()}
  </td>
  </tr>
  );
@@ -705,19 +850,43 @@ export default function AppointmentsPage() {
  />
  </div>
  <div>
- <label className="block font-bold uppercase tracking-wider mb-1">Source Type</label>
+ <label className="block font-bold uppercase tracking-wider mb-1">Source Type *</label>
  <select
  value={formData.source_type}
- onChange={(e) => setFormData({ ...formData, source_type: e.target.value })}
+ onChange={(e) => {
+   const val = e.target.value;
+   setFormData({
+     ...formData,
+     source_type: val,
+     referral_name: val === 'Referral' ? formData.referral_name : ''
+   });
+ }}
  className="w-full light-input font-bold"
  >
- <option value="Lead">Lead</option>
- <option value="Referral">Referral</option>
  <option value="Direct">Direct</option>
- <option value="KARAN">KARAN</option>
+ <option value="Referral">Referral</option>
  </select>
  </div>
  </div>
+
+ {formData.source_type === 'Referral' && (
+ <div className="p-3 bg-teal-50/70 dark:bg-teal-950/30 rounded-xl border border-teal-200 dark:border-teal-800/80 animate-in fade-in slide-in-from-top-1 duration-200">
+ <label className="block font-bold uppercase tracking-wider mb-1 text-teal-950 dark:text-teal-200">
+ Referral Person / Referrer Name *
+ </label>
+ <input
+ type="text"
+ required
+ placeholder="Enter referral person's full name (e.g. Ramesh Sharma)"
+ value={formData.referral_name}
+ onChange={(e) => setFormData({ ...formData, referral_name: e.target.value })}
+ className="w-full light-input font-bold"
+ />
+ <p className="text-[10px] text-teal-700 dark:text-teal-300 mt-1 font-medium">
+ Specify who referred this customer to the institution.
+ </p>
+ </div>
+ )}
 
  <div>
  <label className="block font-bold uppercase tracking-wider mb-1">Full Address</label>
@@ -918,20 +1087,35 @@ export default function AppointmentsPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-600 dark:text-slate-300">
-                        {csvPreviewRows.map((r, i) => (
-                          <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
-                            <td className="py-1.5 px-2.5 font-bold uppercase text-slate-900 dark:text-white">
-                              {r.client_name || r.name || r.applicant_name || 'N/A'}
-                            </td>
-                            <td className="py-1.5 px-2.5 font-mono">{r.phone || r.mobile || 'N/A'}</td>
-                            <td className="py-1.5 px-2.5 font-mono">{r.aadhaar_number || r.aadhaar || '—'}</td>
-                            <td className="py-1.5 px-2.5 font-bold text-emerald-600">
-                              ₹{parseFloat(r.loan_amount || r.amount || 50000).toLocaleString()}
-                            </td>
-                            <td className="py-1.5 px-2.5">{r.source_type || r.source || 'Lead'}</td>
-                            <td className="py-1.5 px-2.5 uppercase text-slate-500">{r.address || r.city || '—'}</td>
-                          </tr>
-                        ))}
+                        {csvPreviewRows.map((r, i) => {
+                          const clientName = getField(r, ['client_name', 'name', 'client name', 'borrower full name', 'applicant name', 'full name', 'borrower name', 'customer name', 'borrower', 'customer', 'applicant']) || 'N/A';
+                          const phone = getField(r, ['phone', 'mobile', 'mobile number', 'mobile phone', 'primary mobile', 'contact', 'phone number', 'primary phone', 'mobile no', 'contact no']) || 'N/A';
+                          const aadhaar = getField(r, ['aadhaar_number', 'aadhaar', 'aadhar', 'aadhaar number', 'aadhar number', 'uid', 'uidai']) || '—';
+                          const amount = getAmount(r, ['loan_amount', 'amount', 'sanctioned principal', 'loan amount (rs)', 'requested amount', 'principal', 'sanctioned amount', 'loan amt', 'principal amount']);
+                          const source = getField(r, ['source_type', 'source', 'source type', 'lead source', 'channel']) || 'Direct';
+                          const refName = getField(r, ['referral_name', 'referrer', 'referred_by', 'referral', 'ref_name']) || '';
+                          const address = getField(r, ['address', 'city', 'location', 'full address', 'city / town', 'city / location', 'town', 'district', 'village']) || '—';
+
+                          return (
+                            <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                              <td className="py-1.5 px-2.5 font-bold uppercase text-slate-900 dark:text-white">
+                                {clientName}
+                              </td>
+                              <td className="py-1.5 px-2.5 font-mono">{phone}</td>
+                              <td className="py-1.5 px-2.5 font-mono">{aadhaar}</td>
+                              <td className="py-1.5 px-2.5 font-bold text-emerald-600">
+                                ₹{amount.toLocaleString()}
+                              </td>
+                              <td className="py-1.5 px-2.5">
+                                <div>
+                                  <span className="font-semibold">{source}</span>
+                                  {refName && <span className="block text-[9px] text-slate-400">Ref: {refName}</span>}
+                                </div>
+                              </td>
+                              <td className="py-1.5 px-2.5 uppercase text-slate-500">{address}</td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -960,6 +1144,21 @@ export default function AppointmentsPage() {
                   <span className="text-2xl font-black text-slate-700 dark:text-slate-300">{importResult.skipped}</span>
                 </div>
               </div>
+              {importResult.errors && importResult.errors.length > 0 && (
+                <div className="mt-4 p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl text-left max-w-lg mx-auto">
+                  <p className="text-[11px] font-bold text-amber-800 dark:text-amber-200 mb-1.5 flex items-center gap-1.5">
+                    <AlertCircle className="h-3.5 w-3.5 text-amber-600" />
+                    <span>Skipped Rows / Validation Notices ({importResult.errors.length}):</span>
+                  </p>
+                  <div className="max-h-32 overflow-y-auto space-y-1 text-[11px] text-amber-700 dark:text-amber-300 font-mono">
+                    {importResult.errors.map((err, idx) => (
+                      <div key={idx} className="bg-amber-100/60 dark:bg-amber-900/30 px-2 py-0.5 rounded">
+                        {err}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

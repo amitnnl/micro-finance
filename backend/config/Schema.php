@@ -28,6 +28,8 @@ class Schema {
             try { $db->exec("ALTER TABLE `users` ADD COLUMN `phone` VARCHAR(20) NULL"); } catch (Exception $e) {}
             try { $db->exec("ALTER TABLE `users` ADD COLUMN `role` ENUM('admin', 'manager', 'staff') DEFAULT 'staff'"); } catch (Exception $e) {}
             try { $db->exec("ALTER TABLE `users` ADD COLUMN `status` ENUM('active', 'inactive') DEFAULT 'active'"); } catch (Exception $e) {}
+            try { $db->exec("ALTER TABLE `loans` ADD COLUMN `lead_date` DATE NULL"); } catch (Exception $e) {}
+            try { $db->exec("ALTER TABLE `loans` ADD COLUMN `application_date` DATE NULL"); } catch (Exception $e) {}
             try { $db->exec("ALTER TABLE `loans` ADD COLUMN `disbursement_date` DATE NULL"); } catch (Exception $e) {}
             try { $db->exec("ALTER TABLE `loans` ADD COLUMN `approval_date` DATE NULL"); } catch (Exception $e) {}
             try { $db->exec("ALTER TABLE `loans` ADD COLUMN `approval_notes` TEXT NULL"); } catch (Exception $e) {}
@@ -118,6 +120,8 @@ class Schema {
                 `pending_count` INT DEFAULT 0,
                 `next_due_date` DATE DEFAULT NULL,
                 `status` VARCHAR(30) NOT NULL DEFAULT 'Pending Approval',
+                `lead_date` DATE DEFAULT NULL,
+                `application_date` DATE DEFAULT NULL,
                 `approval_date` DATE DEFAULT NULL,
                 `approval_notes` TEXT DEFAULT NULL,
                 `disbursement_date` DATE DEFAULT NULL,
@@ -177,12 +181,13 @@ class Schema {
                 `aadhaar_number` VARCHAR(20) DEFAULT NULL,
                 `loan_amount` DECIMAL(12,0) DEFAULT 0,
                 `lead_date` DATE DEFAULT NULL,
-                `source_type` ENUM('Lead', 'Referral', 'Direct') DEFAULT 'Lead',
+                `source_type` VARCHAR(50) DEFAULT 'Direct',
+                `referral_name` VARCHAR(150) DEFAULT NULL,
                 `email` VARCHAR(150) DEFAULT NULL,
                 `address` TEXT DEFAULT NULL,
                 `city` VARCHAR(100) DEFAULT NULL,
                 `appointment_date` DATE DEFAULT NULL,
-                `status` ENUM('Pending', 'Approved', 'Rejected') DEFAULT 'Pending',
+                `status` VARCHAR(50) DEFAULT 'Pending',
                 `reject_reason` TEXT DEFAULT NULL,
                 `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
@@ -197,7 +202,7 @@ class Schema {
                 `city` VARCHAR(100) DEFAULT NULL,
                 `loan_type` VARCHAR(100) DEFAULT 'Personal Loan',
                 `amount` DECIMAL(12,0) DEFAULT 0,
-                `status` ENUM('Pending', 'Approved', 'Rejected') DEFAULT 'Pending',
+                `status` VARCHAR(50) DEFAULT 'Pending',
                 `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
@@ -286,6 +291,8 @@ class Schema {
                 `pending_count` INTEGER DEFAULT 0,
                 `next_due_date` DATE DEFAULT NULL,
                 `status` TEXT NOT NULL DEFAULT 'Pending Approval',
+                `lead_date` DATE DEFAULT NULL,
+                `application_date` DATE DEFAULT NULL,
                 `approval_date` DATE DEFAULT NULL,
                 `approval_notes` TEXT DEFAULT NULL,
                 `disbursement_date` DATE DEFAULT NULL,
@@ -338,7 +345,8 @@ class Schema {
                 `aadhaar_number` TEXT DEFAULT NULL,
                 `loan_amount` NUMERIC DEFAULT 0,
                 `lead_date` DATE DEFAULT NULL,
-                `source_type` TEXT DEFAULT 'Lead',
+                `source_type` TEXT DEFAULT 'Direct',
+                `referral_name` TEXT DEFAULT NULL,
                 `email` TEXT DEFAULT NULL,
                 `address` TEXT DEFAULT NULL,
                 `city` TEXT DEFAULT NULL,
@@ -386,6 +394,7 @@ class Schema {
             try { $db->exec("ALTER TABLE `users` ADD COLUMN `phone` VARCHAR(20) NULL"); } catch (Exception $e) {}
             try { $db->exec("ALTER TABLE `users` ADD COLUMN `role` ENUM('admin', 'manager', 'staff') DEFAULT 'staff'"); } catch (Exception $e) {}
             try { $db->exec("ALTER TABLE `users` ADD COLUMN `status` ENUM('active', 'inactive') DEFAULT 'active'"); } catch (Exception $e) {}
+            try { $db->exec("ALTER TABLE `appointments` ADD COLUMN `referral_name` VARCHAR(150) NULL DEFAULT NULL"); } catch (Exception $e) {}
         }
         $hash = '$2y$10$Q0rFQWNNitaIrHug8NdXE.pCMSH6KdjEXJJ0e6rfpp0yIhSor6gbu'; // bcrypt of admin123
 
@@ -406,17 +415,7 @@ class Schema {
         }
 
         try {
-            $stmtKaspr = $db->prepare("SELECT id, password FROM `users` WHERE `email` = 'admin@kaspr.com' LIMIT 1");
-            $stmtKaspr->execute();
-            $userKaspr = $stmtKaspr->fetch(PDO::FETCH_ASSOC);
-            if (!$userKaspr) {
-                $insertKaspr = $db->prepare("INSERT INTO `users` (`name`, `email`, `phone`, `password`, `role`, `status`) 
-                    VALUES ('Kaspr Admin', 'admin@kaspr.com', '9876543210', :pass, 'admin', 'active')");
-                $insertKaspr->execute([':pass' => $hash]);
-            } else if (!password_verify('admin123', $userKaspr['password'])) {
-                $upKaspr = $db->prepare("UPDATE `users` SET `password` = :pass, `role` = 'admin', `status` = 'active' WHERE `id` = :id");
-                $upKaspr->execute([':pass' => $hash, ':id' => $userKaspr['id']]);
-            }
+            $db->exec("DELETE FROM `users` WHERE `email` = 'admin@kaspr.com'");
         } catch (Exception $e) {}
     }
 
@@ -427,13 +426,13 @@ class Schema {
             $count = ($stmt !== false) ? (int)$stmt->fetchColumn() : 0;
 
             $defaults = [
-                'institution_name' => 'Kaspr Group of Microfinance',
-                'tagline' => 'State Highway No.11,Opp. KIA Show Room, Kailash Nagar, Narnaul-123001 (Haryana) INDIA',
+                'institution_name' => 'Microfinance Institution',
+                'tagline' => 'Registered Non-Banking Financial Company (NBFC - MFI)',
                 'cin_number' => 'U65929RJ2024NPL089123',
-                'branch_code' => 'BR-NNL-001',
+                'branch_code' => 'BR-001',
                 'phone' => '+91 99910 95051',
-                'email' => 'support@kasprgroup.in',
-                'address' => 'State Highway No.11, Opp. KIA Show Room, Kailash Nagar',
+                'email' => 'info@microfinance.com',
+                'address' => 'Main Branch Office',
                 'city' => 'Narnaul',
                 'state' => 'Haryana',
                 'pincode' => '123001',
@@ -443,8 +442,8 @@ class Schema {
                 'grace_period' => '5',
                 'max_loan_limit' => '200000',
                 'receipt_terms' => 'All payments are non-refundable. Please keep this official receipt for future reference.',
-                'signatory_name' => 'Karan Singh',
-                'signatory_title' => 'Managing Director'
+                'signatory_name' => 'Authorized Signatory',
+                'signatory_title' => 'Authorized Officer'
             ];
 
             if ($count === 0) {

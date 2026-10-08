@@ -3,14 +3,14 @@ import api from '../services/api';
 
 const SettingsContext = createContext();
 
-export const defaultSettings = {
-  institution_name: 'Kaspr Group of Microfinance',
-  tagline: 'State Highway No.11,Opp. KIA Show Room, Kailash Nagar, Narnaul-123001 (Haryana) INDIA',
+const defaultSettings = {
+  institution_name: 'Microfinance Institution',
+  tagline: 'Registered Non-Banking Financial Company (NBFC - MFI)',
   cin_number: 'U65929RJ2024NPL089123',
-  branch_code: 'BR-NNL-001',
+  branch_code: 'BR-001',
   phone: '+91 99910 95051',
-  email: 'support@kasprgroup.in',
-  address: 'State Highway No.11, Opp. KIA Show Room, Kailash Nagar',
+  email: 'info@microfinance.com',
+  address: 'Main Branch Office',
   city: 'Narnaul',
   state: 'Haryana',
   pincode: '123001',
@@ -21,8 +21,8 @@ export const defaultSettings = {
   grace_period: '5',
   max_loan_limit: '200000',
   receipt_terms: 'All payments are non-refundable. Please keep this official receipt for future reference.',
-  signatory_name: 'Karan Singh',
-  signatory_title: 'Managing Director'
+  signatory_name: 'Authorized Signatory',
+  signatory_title: 'Authorized Officer'
 };
 
 const getInitialSettings = () => {
@@ -31,6 +31,16 @@ const getInitialSettings = () => {
     if (cached) {
       const parsed = JSON.parse(cached);
       if (parsed && typeof parsed === 'object') {
+        // Clear out old hardcoded placeholders if present in cached browser storage
+        if (parsed.institution_name && /kaspr/i.test(parsed.institution_name)) {
+          delete parsed.institution_name;
+        }
+        if (parsed.signatory_name && /karan\s*singh/i.test(parsed.signatory_name)) {
+          delete parsed.signatory_name;
+        }
+        if (parsed.email && /kaspr/i.test(parsed.email)) {
+          delete parsed.email;
+        }
         return { ...defaultSettings, ...parsed };
       }
     }

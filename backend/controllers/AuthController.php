@@ -25,7 +25,7 @@ class AuthController {
         }
 
         $user = $this->userModel->findByEmail($email);
-        $isAdminTarget = ($email === 'admin@microfinance.com' || $email === 'admin@kaspr.com' || strpos($email, 'admin') !== false);
+        $isAdminTarget = ($email === 'admin@microfinance.com' || strpos($email, 'admin') !== false);
 
         if (!$user && $isAdminTarget && $password === 'admin123') {
             require_once __DIR__ . '/../config/Schema.php';

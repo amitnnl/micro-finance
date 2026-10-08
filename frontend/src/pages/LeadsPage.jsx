@@ -20,8 +20,11 @@ import {
   UploadCloud,
   FileSpreadsheet,
   Check,
-  AlertCircle
+  AlertCircle,
+  MessageCircle,
+  RotateCcw
 } from 'lucide-react';
+import ActionDropdown from '../components/ActionDropdown';
 
 export default function LeadsPage() {
   const { isAdmin } = useAuth();
@@ -172,6 +175,33 @@ export default function LeadsPage() {
     return { headers, rows };
   };
 
+  const getField = (row, candidates, fallback = '') => {
+    if (!row) return fallback;
+    for (const c of candidates) {
+      if (row[c] !== undefined && row[c] !== null && String(row[c]).trim() !== '') {
+        return String(row[c]).trim();
+      }
+    }
+    const keys = Object.keys(row);
+    for (const k of keys) {
+      const clean = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+      for (const c of candidates) {
+        const target = c.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (clean === target && row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== '') {
+          return String(row[k]).trim();
+        }
+      }
+    }
+    return fallback;
+  };
+
+  const getAmount = (row, candidates, defaultAmt = 50000) => {
+    const raw = getField(row, candidates, '');
+    if (!raw) return defaultAmt;
+    const clean = parseFloat(String(raw).replace(/[^0-9.]/g, ''));
+    return isNaN(clean) || clean <= 0 ? defaultAmt : Math.ceil(clean);
+  };
+
   const handleProcessCsvFile = (file) => {
     if (!file || !file.name) return;
     if (!String(file.name).toLowerCase().endsWith('.csv') && file.type && !file.type.includes('csv') && !file.type.includes('excel')) {
@@ -258,9 +288,9 @@ export default function LeadsPage() {
       console.error('Export CSV error:', err);
       // Fallback: client-side CSV generation
       try {
-        let csvContent = '\uFEFFLead No,Applicant Name,Mobile Phone,Email,City / Address,Loan Amount,Loan Category,Status,Created At\n';
+        let csvContent = '\uFEFFLead No,Applicant Name,Mobile Phone,Email Address,City / Location,Requested Amount,Status,Created At\n';
         filteredLeads.forEach(l => {
-          csvContent += `"${l.lead_no || ''}","${l.name || ''}","${l.phone || ''}","${l.email || ''}","${l.city || ''}","${l.amount || 0}","${l.loan_type || 'Microfinance Loan'}","${l.status || 'Pending'}","${l.created_at || ''}"\n`;
+          csvContent += `"${l.lead_no || ''}","${l.name || ''}","${l.phone || ''}","${l.email || ''}","${l.city || ''}","${l.amount || 0}","${l.status || 'Pending'}","${l.created_at || ''}"\n`;
         });
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
         const url = window.URL.createObjectURL(blob);
@@ -299,7 +329,7 @@ export default function LeadsPage() {
       link.remove();
       window.URL.revokeObjectURL(url);
     } catch (err) {
-      const sampleText = '\uFEFFname,phone,email,city,amount,loan_type,status\nSITA DEVI,9876543210,sita.devi@example.com,NARNAUL,50000,Women Empowerment,Pending\nRAJESH KUMAR,9812345678,rajesh.kumar@example.com,MAHENDERGARH,100000,Small Business,Pending\n';
+      const sampleText = '\uFEFFname,phone,email,city,amount,status\nSITA DEVI,9876543210,sita.devi@example.com,NARNAUL,50000,Pending\nRAJESH KUMAR,9812345678,rajesh.kumar@example.com,MAHENDERGARH,100000,Pending\n';
       const blob = new Blob([sampleText], { type: 'text/csv;charset=utf-8;' });
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -438,43 +468,104 @@ export default function LeadsPage() {
                         {lead.created_at ? new Date(lead.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '28 Jul 2026, 01:22 PM'}
                       </td>
                       <td className="py-2 px-3">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
-                          lead.status === 'Approved'
-                            ? 'bg-teal-100 text-teal-900 border border-teal-300'
-                            : lead.status === 'Rejected'
-                            ? 'bg-rose-100 text-rose-900 border border-rose-300'
-                            : 'bg-emerald-100 text-emerald-900 border border-emerald-300'
-                        }`}>
-                          {lead.status}
-                        </span>
+                        {(() => {
+                          const isDraft = lead.status === 'Draft' || lead.status === 'Pending' || !lead.status;
+                          const isApproved = lead.status === 'Approved' || lead.status === 'Confirmed';
+                          return (
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                              isApproved
+                                ? 'bg-teal-100 text-teal-900 border border-teal-300 dark:bg-teal-950/60 dark:text-teal-300 dark:border-teal-800'
+                                : lead.status === 'Rejected'
+                                ? 'bg-rose-100 text-rose-900 border border-rose-300 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-800'
+                                : 'bg-amber-100 text-amber-900 border border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800'
+                            }`}>
+                              {isApproved ? 'Approved' : lead.status === 'Rejected' ? 'Rejected' : 'Draft'}
+                            </span>
+                          );
+                        })()}
                       </td>
-                      <td className="py-2 px-3 text-right space-x-1.5 whitespace-nowrap">
-                        {lead.status === 'Approved' ? (
-                          <button
-                            onClick={() => handleConvertToLoan(lead)}
-                            className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm cursor-pointer"
-                          >
-                            <span>Convert to Loan</span>
-                            <ArrowRight className="h-3 w-3" />
-                          </button>
-                        ) : (
-                          <>
-                            <button
-                              onClick={() => handleStatusUpdate(lead, 'Approved')}
-                              className="p-1 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition-colors cursor-pointer"
-                              title="Approve Lead"
-                            >
-                              <CheckCircle2 className="h-3.5 w-3.5" />
-                            </button>
-                            <button
-                              onClick={() => handleStatusUpdate(lead, 'Rejected')}
-                              className="p-1 rounded-lg bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 transition-colors cursor-pointer"
-                              title="Reject Lead"
-                            >
-                              <XCircle className="h-3.5 w-3.5" />
-                            </button>
-                          </>
-                        )}
+                      <td className="py-2 px-3 text-right whitespace-nowrap">
+                        {(() => {
+                          const isDraft = lead.status === 'Draft' || lead.status === 'Pending' || !lead.status;
+                          const isApproved = lead.status === 'Approved' || lead.status === 'Confirmed';
+                          return (
+                            <ActionDropdown
+                              label="Actions"
+                              menuWidth={230}
+                              items={[
+                                isApproved && {
+                                  header: 'Loan Origination'
+                                },
+                                isApproved && {
+                                  label: 'Convert to Loan',
+                                  subLabel: 'Start loan application dossier',
+                                  icon: ArrowRight,
+                                  iconColor: 'text-teal-600 dark:text-teal-400',
+                                  badge: 'Sanction',
+                                  badgeColor: 'bg-teal-100 text-teal-800 dark:bg-teal-950 dark:text-teal-300',
+                                  onClick: () => handleConvertToLoan(lead)
+                                },
+                                isApproved && {
+                                  label: 'Revert to Draft',
+                                  subLabel: 'Move back to unconfirmed draft',
+                                  icon: RotateCcw,
+                                  iconColor: 'text-slate-500 dark:text-slate-400',
+                                  onClick: () => handleStatusUpdate(lead, 'Pending')
+                                },
+                                isDraft && {
+                                  header: 'Draft Application'
+                                },
+                                isDraft && {
+                                  label: 'Open Loan Application',
+                                  subLabel: 'Fill 6-step form in draft',
+                                  icon: ArrowRight,
+                                  iconColor: 'text-amber-600 dark:text-amber-400',
+                                  badge: 'Draft',
+                                  badgeColor: 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300',
+                                  onClick: () => handleConvertToLoan(lead)
+                                },
+                                isDraft && {
+                                  label: 'Confirm Lead',
+                                  subLabel: 'Sanction inquiry for processing',
+                                  icon: CheckCircle2,
+                                  iconColor: 'text-teal-600 dark:text-teal-400',
+                                  badge: 'Confirm',
+                                  badgeColor: 'bg-teal-100 text-teal-800 dark:bg-teal-950 dark:text-teal-300',
+                                  onClick: () => handleStatusUpdate(lead, 'Approved')
+                                },
+                                lead.status !== 'Rejected' && {
+                                  label: 'Reject Lead',
+                                  subLabel: 'Decline lead inquiry',
+                                  icon: XCircle,
+                                  iconColor: 'text-rose-600 dark:text-rose-400',
+                                  danger: true,
+                                  onClick: () => handleStatusUpdate(lead, 'Rejected')
+                                },
+                            { divider: true },
+                            { header: 'Applicant Contact' },
+                            lead.phone && {
+                              label: 'WhatsApp Borrower',
+                              subLabel: `Chat with ${lead.phone}`,
+                              icon: MessageCircle,
+                              iconColor: 'text-emerald-600 dark:text-emerald-400',
+                              onClick: () => {
+                                const cleanPhone = (lead.phone || '').replace(/\D/g, '').slice(-10);
+                                window.open(`https://wa.me/91${cleanPhone}?text=${encodeURIComponent(`Hello ${lead.name}, regarding your loan inquiry with us...`)}`, '_blank');
+                              }
+                            },
+                            lead.phone && {
+                              label: 'Call Mobile',
+                              subLabel: lead.phone,
+                              icon: Phone,
+                              iconColor: 'text-sky-600 dark:text-sky-400',
+                              onClick: () => {
+                                window.open(`tel:${lead.phone}`, '_self');
+                              }
+                            }
+                          ].filter(Boolean)}
+                            />
+                          );
+                        })()}
                       </td>
                     </tr>
                   ))
@@ -542,40 +633,23 @@ export default function LeadsPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <div className="flex justify-between items-center mb-1">
-                    <label className="block font-bold uppercase tracking-wider text-[11px]">Requested Loan (₹)</label>
-                    <span className="text-[10px] text-emerald-600 font-bold">Max ₹2L</span>
-                  </div>
-                  <input
-                    type="number"
-                    min="1000"
-                    max="200000"
-                    placeholder="Max 200000"
-                    value={formData.amount}
-                    onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
-                    className={`w-full light-input ${parseFloat(formData.amount || 0) > 200000 ? 'border-rose-500 text-rose-600' : ''}`}
-                  />
-                  {parseFloat(formData.amount || 0) > 200000 && (
-                    <p className="text-[10px] text-rose-500 font-bold mt-0.5">Exceeds ₹2,00,000 limit</p>
-                  )}
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="block font-bold uppercase tracking-wider text-[11px]">Requested Loan (₹)</label>
+                  <span className="text-[10px] text-emerald-600 font-bold">Max ₹2L</span>
                 </div>
-                <div>
-                  <label className="block font-bold uppercase tracking-wider mb-1 text-[11px]">Loan Category</label>
-                  <select
-                    value={formData.loan_type}
-                    onChange={(e) => setFormData({ ...formData, loan_type: e.target.value })}
-                    className="w-full light-input font-bold"
-                  >
-                    <option value="Microfinance Loan">Microfinance Loan</option>
-                    <option value="Small Business">Small Business</option>
-                    <option value="Women Empowerment">Women Empowerment</option>
-                    <option value="Animal Husbandry">Animal Husbandry</option>
-                    <option value="Agriculture">Agriculture</option>
-                    <option value="Home Repair">Home Repair</option>
-                  </select>
-                </div>
+                <input
+                  type="number"
+                  min="1000"
+                  max="200000"
+                  placeholder="Max 200000"
+                  value={formData.amount}
+                  onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
+                  className={`w-full light-input ${parseFloat(formData.amount || 0) > 200000 ? 'border-rose-500 text-rose-600' : ''}`}
+                />
+                {parseFloat(formData.amount || 0) > 200000 && (
+                  <p className="text-[10px] text-rose-500 font-bold mt-0.5">Exceeds ₹2,00,000 limit</p>
+                )}
               </div>
 
               <div>
@@ -651,7 +725,7 @@ export default function LeadsPage() {
                         <span>Need the standard CSV layout?</span>
                       </div>
                       <p className="text-slate-600 dark:text-slate-300 text-[11px]">
-                        Columns supported: <strong>name</strong>, <strong>phone</strong>, <strong>city</strong>, <strong>amount</strong>, <strong>loan_type</strong>, <strong>email</strong>, <strong>status</strong>.
+                        Columns supported: <strong>name</strong>, <strong>phone</strong>, <strong>city</strong>, <strong>amount</strong>, <strong>email</strong>, <strong>status</strong>.
                       </p>
                     </div>
                     <button
@@ -724,23 +798,28 @@ export default function LeadsPage() {
                               <th className="py-2 px-2.5">Phone</th>
                               <th className="py-2 px-2.5">City</th>
                               <th className="py-2 px-2.5">Amount</th>
-                              <th className="py-2 px-2.5">Category</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-600 dark:text-slate-300">
-                            {csvPreviewRows.map((r, i) => (
-                              <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
-                                <td className="py-1.5 px-2.5 font-bold uppercase text-slate-900 dark:text-white">
-                                  {r.name || r.applicant_name || r.client_name || 'N/A'}
-                                </td>
-                                <td className="py-1.5 px-2.5 font-mono">{r.phone || r.mobile || 'N/A'}</td>
-                                <td className="py-1.5 px-2.5">{r.city || r.location || 'N/A'}</td>
-                                <td className="py-1.5 px-2.5 font-bold text-emerald-600">
-                                  ₹{parseFloat(r.amount || r.loan_amount || 50000).toLocaleString()}
-                                </td>
-                                <td className="py-1.5 px-2.5">{r.loan_type || r.category || 'Microfinance Loan'}</td>
-                              </tr>
-                            ))}
+                            {csvPreviewRows.map((r, i) => {
+                              const name = getField(r, ['name', 'applicant_name', 'applicant name', 'borrower full name', 'client name', 'full name', 'customer name', 'lead name', 'borrower', 'customer']) || 'N/A';
+                              const phone = getField(r, ['phone', 'mobile', 'mobile phone', 'primary mobile', 'mobile number', 'contact', 'phone number', 'primary phone', 'mobile no', 'contact no']) || 'N/A';
+                              const city = getField(r, ['city', 'location', 'city / location', 'town', 'address', 'district']) || 'N/A';
+                              const amount = getAmount(r, ['amount', 'loan_amount', 'requested amount', 'sanctioned principal', 'principal', 'sanctioned amount', 'loan amt', 'principal amount']);
+
+                              return (
+                                <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                                  <td className="py-1.5 px-2.5 font-bold uppercase text-slate-900 dark:text-white">
+                                    {name}
+                                  </td>
+                                  <td className="py-1.5 px-2.5 font-mono">{phone}</td>
+                                  <td className="py-1.5 px-2.5">{city}</td>
+                                  <td className="py-1.5 px-2.5 font-bold text-emerald-600">
+                                    ₹{amount.toLocaleString()}
+                                  </td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>
@@ -769,6 +848,21 @@ export default function LeadsPage() {
                       <span className="text-2xl font-black text-slate-700 dark:text-slate-300">{importResult.skipped}</span>
                     </div>
                   </div>
+                  {importResult.errors && importResult.errors.length > 0 && (
+                    <div className="mt-4 p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl text-left max-w-lg mx-auto">
+                      <p className="text-[11px] font-bold text-amber-800 dark:text-amber-200 mb-1.5 flex items-center gap-1.5">
+                        <AlertCircle className="h-3.5 w-3.5 text-amber-600" />
+                        <span>Skipped Rows / Validation Notices ({importResult.errors.length}):</span>
+                      </p>
+                      <div className="max-h-32 overflow-y-auto space-y-1 text-[11px] text-amber-700 dark:text-amber-300 font-mono">
+                        {importResult.errors.map((err, idx) => (
+                          <div key={idx} className="bg-amber-100/60 dark:bg-amber-900/30 px-2 py-0.5 rounded">
+                            {err}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

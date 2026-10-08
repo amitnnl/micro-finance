@@ -74,6 +74,7 @@ class ReportController {
     }
 
     public function storeEntry() {
+        AuthHelper::requireRole(['admin']);
         $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
         if (empty($input['type']) || empty($input['category']) || empty($input['amount'])) {
             Response::error('Type, Category, and Amount are required', 400);

@@ -47,6 +47,7 @@ export default function DashboardLayout() {
   const [showQuickActionMenu, setShowQuickActionMenu] = useState(false);
   const [showAccentPicker, setShowAccentPicker] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -67,10 +68,25 @@ export default function DashboardLayout() {
         setShowQuickActionMenu(false);
         setShowAccentPicker(false);
         setShowNotifications(false);
+        setShowProfileMenu(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Dismiss open header menus on click outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (!e.target.closest('.dropdown-area')) {
+        setShowQuickActionMenu(false);
+        setShowAccentPicker(false);
+        setShowNotifications(false);
+        setShowProfileMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   // Role-Based Navigation Items
@@ -116,7 +132,7 @@ export default function DashboardLayout() {
           </div>
           <div>
             <h1 className="font-semibold text-xs tracking-tight truncate max-w-[190px]">
-              {settings.institution_name || 'Kaspr Microfinance'}
+              {settings.institution_name || 'Microfinance'}
             </h1>
             <p className="text-[9px] text-slate-400 font-medium">NBFC-MFI CRM Suite</p>
           </div>
@@ -124,13 +140,21 @@ export default function DashboardLayout() {
         <div className="flex items-center space-x-1.5">
           <button
             onClick={() => setShowSearchModal(true)}
-            className="p-1 rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+            className="p-1.5 rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+            title="Search"
           >
             <Search className="h-4 w-4" />
           </button>
+          <button
+            onClick={handleLogout}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors"
+            title="Logout Session"
+          >
+            <LogOut className="h-4 w-4" />
+          </button>
           <button 
             onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200"
+            className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200"
           >
             {sidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </button>
@@ -165,7 +189,7 @@ export default function DashboardLayout() {
             {!isCollapsed && (
               <div className="truncate">
                 <h1 className="font-semibold text-slate-900 dark:text-white text-xs leading-snug truncate">
-                  {settings.institution_name || 'Kaspr Microfinance'}
+                  {settings.institution_name || 'Microfinance'}
                 </h1>
                 <div className="flex items-center space-x-1.5 mt-0.5">
                   <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 inline-block"></span>
@@ -297,9 +321,14 @@ export default function DashboardLayout() {
           <div className="flex items-center space-x-2.5">
             
             {/* Quick Action Button & Dropdown */}
-            <div className="relative">
+            <div className="relative dropdown-area">
               <button
-                onClick={() => setShowQuickActionMenu(!showQuickActionMenu)}
+                onClick={() => {
+                  setShowQuickActionMenu(!showQuickActionMenu);
+                  setShowAccentPicker(false);
+                  setShowNotifications(false);
+                  setShowProfileMenu(false);
+                }}
                 className="crm-btn-primary h-8 px-3 text-xs gap-1.5"
               >
                 <Plus className="h-3.5 w-3.5" />
@@ -333,21 +362,28 @@ export default function DashboardLayout() {
                     <UserPlus className="h-3.5 w-3.5 text-teal-500" />
                     <span>Create New Lead</span>
                   </button>
-                  <button
-                    onClick={() => { setShowQuickActionMenu(false); navigate('/reports'); }}
-                    className="w-full text-left px-2.5 py-2 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center space-x-2 text-slate-800 dark:text-slate-200 cursor-pointer border-t border-slate-100 dark:border-slate-800 mt-1 pt-1"
-                  >
-                    <LineChart className="h-3.5 w-3.5 text-blue-500" />
-                    <span>Branch P&L Audit</span>
-                  </button>
+                  {role === 'admin' && (
+                    <button
+                      onClick={() => { setShowQuickActionMenu(false); navigate('/reports'); }}
+                      className="w-full text-left px-2.5 py-2 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center space-x-2 text-slate-800 dark:text-slate-200 cursor-pointer border-t border-slate-100 dark:border-slate-800 mt-1 pt-1"
+                    >
+                      <LineChart className="h-3.5 w-3.5 text-blue-500" />
+                      <span>Branch P&L Audit</span>
+                    </button>
+                  )}
                 </div>
               )}
             </div>
 
             {/* Dynamic Accent Color Switcher Popover */}
-            <div className="relative">
+            <div className="relative dropdown-area">
               <button 
-                onClick={() => setShowAccentPicker(!showAccentPicker)}
+                onClick={() => {
+                  setShowAccentPicker(!showAccentPicker);
+                  setShowQuickActionMenu(false);
+                  setShowNotifications(false);
+                  setShowProfileMenu(false);
+                }}
                 className="p-2 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
                 title="Dynamic CRM Theme Accents"
               >
@@ -392,9 +428,14 @@ export default function DashboardLayout() {
             </button>
 
             {/* Notifications Popover */}
-            <div className="relative">
+            <div className="relative dropdown-area">
               <button 
-                onClick={() => setShowNotifications(!showNotifications)}
+                onClick={() => {
+                  setShowNotifications(!showNotifications);
+                  setShowQuickActionMenu(false);
+                  setShowAccentPicker(false);
+                  setShowProfileMenu(false);
+                }}
                 className="p-2 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors relative cursor-pointer"
               >
                 <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-emerald-500"></span>
@@ -423,20 +464,100 @@ export default function DashboardLayout() {
 
             <div className="h-5 w-px bg-slate-200 dark:bg-slate-700" />
 
-            {/* Officer Profile Badge */}
-            <div className="flex items-center space-x-2 pl-1">
-              <div 
-                className="h-8 w-8 rounded-lg flex items-center justify-center font-bold text-xs text-white shrink-0"
-                style={{ background: 'var(--crm-primary)' }}
+            {/* Officer Profile Badge & Dropdown with Logout */}
+            <div className="relative dropdown-area">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowProfileMenu(!showProfileMenu);
+                  setShowQuickActionMenu(false);
+                  setShowAccentPicker(false);
+                  setShowNotifications(false);
+                }}
+                className="flex items-center space-x-2 pl-1 pr-1.5 py-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer group"
+                title="Account Menu & Logout"
               >
-                {user?.name?.charAt(0) || 'A'}
-              </div>
-              <div className="hidden lg:block text-left leading-tight">
-                <p className="text-xs font-bold text-slate-900 dark:text-white">{user?.name || 'Loan Officer'}</p>
-                <p className="text-[10px] text-slate-400 capitalize font-medium">
-                  {isAdmin ? 'System Admin' : (isManager ? 'Branch Manager' : 'Field Staff')}
-                </p>
-              </div>
+                <div 
+                  className="h-8 w-8 rounded-lg flex items-center justify-center font-bold text-xs text-white shrink-0 shadow-xs ring-2 ring-transparent group-hover:ring-indigo-500/20 transition-all"
+                  style={{ background: 'var(--crm-primary)' }}
+                >
+                  {user?.name?.charAt(0) || 'A'}
+                </div>
+                <div className="hidden lg:block text-left leading-tight">
+                  <p className="text-xs font-bold text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
+                    {user?.name || 'Loan Officer'}
+                  </p>
+                  <p className="text-[10px] text-slate-400 capitalize font-medium">
+                    {isAdmin ? 'System Admin' : (isManager ? 'Branch Manager' : 'Field Staff')}
+                  </p>
+                </div>
+                <ChevronDown className={`h-3.5 w-3.5 text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-200 transition-transform duration-200 ${showProfileMenu ? 'rotate-180' : ''}`} />
+              </button>
+
+              {showProfileMenu && (
+                <div className="absolute right-0 mt-2 w-60 bg-white dark:bg-slate-900 rounded-xl shadow-xl border border-slate-200 dark:border-slate-800 p-1.5 text-xs z-50 animate-in fade-in zoom-in-95 duration-150">
+                  {/* Officer Profile Card */}
+                  <div className="px-3 py-2.5 bg-slate-50 dark:bg-slate-800/50 rounded-lg mb-1 border border-slate-100 dark:border-slate-800/60">
+                    <p className="font-bold text-slate-900 dark:text-white truncate">
+                      {user?.name || 'Authorized Officer'}
+                    </p>
+                    <p className="text-[11px] text-slate-400 truncate">
+                      {user?.email || (user?.username ? `@${user.username}` : (settings?.branch_code || 'Official Account'))}
+                    </p>
+                    <div className="mt-1.5 flex items-center space-x-1.5">
+                      <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
+                      <span className="text-[9px] font-black uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                        {isAdmin ? 'System Admin' : (isManager ? 'Branch Manager' : 'Field Staff')}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Navigation Shortcuts */}
+                  <div className="space-y-0.5">
+                    {isAdmin && (
+                      <button
+                        onClick={() => { setShowProfileMenu(false); navigate('/settings'); }}
+                        className="w-full text-left px-2.5 py-1.5 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center space-x-2 text-slate-700 dark:text-slate-300 cursor-pointer"
+                      >
+                        <Settings className="h-3.5 w-3.5 text-slate-400" />
+                        <span>Institution Settings</span>
+                      </button>
+                    )}
+
+                    {isAdmin && (
+                      <button
+                        onClick={() => { setShowProfileMenu(false); navigate('/users'); }}
+                        className="w-full text-left px-2.5 py-1.5 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center space-x-2 text-slate-700 dark:text-slate-300 cursor-pointer"
+                      >
+                        <UserCheck className="h-3.5 w-3.5 text-slate-400" />
+                        <span>User Access Control</span>
+                      </button>
+                    )}
+
+                    <button
+                      onClick={() => { setShowProfileMenu(false); navigate('/public'); }}
+                      className="w-full text-left px-2.5 py-1.5 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center space-x-2 text-slate-700 dark:text-slate-300 cursor-pointer"
+                    >
+                      <Globe className="h-3.5 w-3.5 text-slate-400" />
+                      <span>Customer Portal</span>
+                    </button>
+                  </div>
+
+                  <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
+
+                  {/* Logout Button */}
+                  <button
+                    onClick={() => {
+                      setShowProfileMenu(false);
+                      handleLogout();
+                    }}
+                    className="w-full text-left px-2.5 py-2 rounded-md hover:bg-rose-50 dark:hover:bg-rose-950/40 flex items-center space-x-2 text-rose-600 dark:text-rose-400 font-bold cursor-pointer transition-colors"
+                  >
+                    <LogOut className="h-3.5 w-3.5" />
+                    <span>Logout Session</span>
+                  </button>
+                </div>
+              )}
             </div>
 
           </div>

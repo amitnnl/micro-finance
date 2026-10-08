@@ -32,9 +32,16 @@ switch ($route) {
         $controller = new LoanController();
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $controller->store();
+        } elseif ($_SERVER['REQUEST_METHOD'] === 'PUT') {
+            $controller->update();
         } else {
             $controller->index();
         }
+        break;
+
+    case 'loans/update':
+        require_once __DIR__ . '/../controllers/LoanController.php';
+        (new LoanController())->update();
         break;
 
     case 'loans/detail':

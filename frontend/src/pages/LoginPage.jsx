@@ -101,7 +101,7 @@ export default function LoginPage() {
                 OFFICER CONTROL PORTAL
               </span>
             </div>
-            <h2 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">{settings.institution_name || 'Kaspr Group of Microfinance'}</h2>
+            <h2 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">{settings.institution_name || 'Microfinance Institution'}</h2>
             <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">{settings.tagline || 'Sign in to your Microfinance Control Dashboard'}</p>
           </div>
 
@@ -162,22 +162,14 @@ export default function LoginPage() {
                 <Key className="h-3 w-3 text-blue-600 dark:text-blue-400" />
                 <span>Quick Fill Admin Credentials:</span>
               </div>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="flex justify-center">
                 <button
                   type="button"
                   onClick={() => fillDemoAdmin('admin@microfinance.com')}
-                  className="py-1 px-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-200 font-medium text-[11px] border border-slate-300 dark:border-slate-700 transition-colors text-center truncate cursor-pointer"
+                  className="w-full py-1.5 px-3 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-200 font-medium text-[11px] border border-slate-300 dark:border-slate-700 transition-colors text-center truncate cursor-pointer"
                   title="Fill admin@microfinance.com / admin123"
                 >
-                  admin@microfinance.com
-                </button>
-                <button
-                  type="button"
-                  onClick={() => fillDemoAdmin('admin@kaspr.com')}
-                  className="py-1 px-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-200 font-medium text-[11px] border border-slate-300 dark:border-slate-700 transition-colors text-center truncate cursor-pointer"
-                  title="Fill admin@kaspr.com / admin123"
-                >
-                  admin@kaspr.com
+                  Quick Fill: admin@microfinance.com
                 </button>
               </div>
             </div>

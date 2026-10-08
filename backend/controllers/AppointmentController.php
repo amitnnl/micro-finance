@@ -38,7 +38,7 @@ class AppointmentController {
         $status = $input['status'] ?? '';
         $reason = $input['reject_reason'] ?? null;
 
-        if ($id <= 0 || !in_array($status, ['Approved', 'Rejected', 'Pending'])) {
+        if ($id <= 0 || !in_array($status, ['Approved', 'Confirmed', 'Rejected', 'Pending', 'Draft', 'Completed'])) {
             Response::error('Invalid ID or status value', 400);
         }
 
@@ -68,6 +68,7 @@ class AppointmentController {
             'Loan Amount (Rs)',
             'Lead Date',
             'Source Type',
+            'Referral Name',
             'Email Address',
             'Address',
             'City / Town',
@@ -84,7 +85,8 @@ class AppointmentController {
                 $apt['aadhaar_number'] ?? '',
                 (float)($apt['loan_amount'] ?? 0),
                 $apt['lead_date'] ?? '',
-                $apt['source_type'] ?? 'Lead',
+                $apt['source_type'] ?? 'Direct',
+                $apt['referral_name'] ?? '',
                 $apt['email'] ?? '',
                 $apt['address'] ?? '',
                 $apt['city'] ?? '',

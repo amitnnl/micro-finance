@@ -9,14 +9,14 @@ class EmiPayment {
     }
 
     public function getActiveLoans() {
-        $stmt = $this->db->prepare("SELECT id, loan_no, agreement_no, customer_id, customer_name, phone, loan_amount, emi_amount, balance_outstanding, received_count, pending_count, COALESCE(next_due_date, DATE(DATE_ADD(COALESCE(disbursement_date, created_at), INTERVAL 1 MONTH))) AS next_due_date, status FROM loans WHERE status = 'Active' ORDER BY id DESC");
+        $stmt = $this->db->prepare("SELECT id, loan_no, agreement_no, customer_id, customer_name, phone, loan_amount, emi_amount, balance_outstanding, received_count, pending_count, lead_date, application_date, approval_date, disbursement_date, created_at, COALESCE(next_due_date, DATE(DATE_ADD(COALESCE(disbursement_date, created_at), INTERVAL 1 MONTH))) AS next_due_date, status FROM loans WHERE status = 'Active' ORDER BY id DESC");
         $stmt->execute();
         return $stmt->fetchAll();
     }
 
     public function getStatement(?string $status = null, ?string $dateFrom = null, ?string $dateTo = null, ?int $loanId = null) {
         $query = "
-            SELECT e.*, l.loan_no, l.agreement_no, l.customer_id, l.customer_name, l.phone, l.co_applicant_name, l.guarantor_name 
+            SELECT e.*, l.loan_no, l.agreement_no, l.customer_id, l.customer_name, l.phone, l.co_applicant_name, l.guarantor_name, l.lead_date, l.application_date, l.approval_date, l.disbursement_date, l.created_at 
             FROM emi_payments e
             JOIN loans l ON e.loan_id = l.id
             WHERE 1=1
@@ -129,6 +129,13 @@ class EmiPayment {
                 'receipt_no' => $receiptNo,
                 'customer_name' => $loan['customer_name'],
                 'loan_no' => $loan['loan_no'],
+                'agreement_no' => $loan['agreement_no'] ?? $loan['loan_no'],
+                'customer_id' => $loan['customer_id'] ?? null,
+                'phone' => $loan['phone'] ?? null,
+                'lead_date' => $loan['lead_date'] ?? null,
+                'application_date' => $loan['application_date'] ?? substr($loan['created_at'], 0, 10),
+                'approval_date' => $loan['approval_date'] ?? null,
+                'disbursement_date' => $loan['disbursement_date'] ?? null,
                 'total_paid' => $totalPaid,
                 'remaining_balance' => $newBalance,
                 'payment_date' => $paymentDate

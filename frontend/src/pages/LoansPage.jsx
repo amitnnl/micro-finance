@@ -43,9 +43,14 @@ import {
  Image as ImageIcon,
  Camera,
  ZoomIn,
- MapPin
+ MapPin,
+ Receipt,
+ MessageCircle,
+ Edit3,
+ Lock
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import ActionDropdown from '../components/ActionDropdown';
 import { lookupPincode } from '../services/pincodeService';
 
 export default function LoansPage() {
@@ -62,10 +67,11 @@ export default function LoansPage() {
   const [successLoanData, setSuccessLoanData] = useState(null);
   const [showAgreementModal, setShowAgreementModal] = useState(false);
   const [selectedAgreementLoan, setSelectedAgreementLoan] = useState(null);
-  const [agreementModalTab, setAgreementModalTab] = useState('application'); // 'application' | 'agreement' | 'schedule'
+  const [agreementModalTab, setAgreementModalTab] = useState('application'); // 'application' | 'sanction' | 'kfs' | 'agreement' | 'schedule' | 'disbursal'
   const [showAmortization, setShowAmortization] = useState(false);
   const [copiedField, setCopiedField] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [editingLoanId, setEditingLoanId] = useState(null);
   const [currentStep, setCurrentStep] = useState(1);
   const [isDraftSaved, setIsDraftSaved] = useState(false);
   const [draftBanner, setDraftBanner] = useState(null);
@@ -217,7 +223,12 @@ export default function LoansPage() {
       const values = parseLine(rowLine).map(v => v.replace(/^["']|["']$/g, '').trim());
       const row = {};
       headers.forEach((h, idx) => {
-        row[h] = values[idx] !== undefined ? values[idx] : '';
+        const val = values[idx] !== undefined ? values[idx] : '';
+        row[h] = val;
+        const cleanK = h.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+        if (cleanK && row[cleanK] === undefined) {
+          row[cleanK] = val;
+        }
       });
       if (Object.values(row).some(v => v !== '')) {
         rows.push(row);
@@ -434,6 +445,161 @@ export default function LoansPage() {
     return schedule;
   };
 
+  // Safe date formatter for document audit trails
+  const formatDocDate = (d, fallback = 'Pending') => {
+    if (!d) return fallback;
+    try {
+      const s = String(d).split('T')[0].split(' ')[0];
+      const parts = s.split('-');
+      if (parts.length === 3 && parts[0].length === 4) {
+        const dateObj = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+        if (!isNaN(dateObj.getTime())) {
+          return dateObj.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+        }
+      }
+      const dateObj = new Date(d);
+      if (!isNaN(dateObj.getTime())) {
+        return dateObj.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+      }
+    } catch (e) {}
+    return String(d) || fallback;
+  };
+
+  // Helper extracting all 4 required lifecycle milestone dates with safe fallback normalization
+  const getLoanMilestones = (loan) => {
+    if (!loan) {
+      return {
+        leadDate: 'N/A',
+        applicationDate: 'N/A',
+        approvalDate: 'Pending',
+        disbursalDate: 'Pending',
+        hasLead: false,
+        hasApp: false,
+        hasApproval: false,
+        hasDisbursal: false
+      };
+    }
+    const rawLead = loan.lead_date || loan.application_date || loan.created_at;
+    const rawApp = loan.application_date || loan.created_at;
+    const rawApproval = loan.approval_date || (loan.status === 'Approved' || loan.status === 'Active' ? (loan.approved_at || loan.created_at) : null);
+    const rawDisbursal = loan.disbursement_date || (loan.status === 'Active' ? loan.start_date : null);
+
+    return {
+      leadDate: formatDocDate(rawLead, 'N/A'),
+      applicationDate: formatDocDate(rawApp, 'N/A'),
+      approvalDate: rawApproval ? formatDocDate(rawApproval) : (loan.status === 'Rejected' ? 'Rejected' : 'Pending Sanction'),
+      disbursalDate: rawDisbursal ? formatDocDate(rawDisbursal) : (loan.status === 'Active' ? 'Disbursed' : 'Pending Disbursal'),
+      hasLead: Boolean(rawLead),
+      hasApp: Boolean(rawApp),
+      hasApproval: Boolean(rawApproval || loan.status === 'Approved' || loan.status === 'Active'),
+      hasDisbursal: Boolean(rawDisbursal || loan.status === 'Active'),
+      rawLead,
+      rawApp,
+      rawApproval,
+      rawDisbursal
+    };
+  };
+
+  // Reusable 4-milestone audit strip rendered across all document types
+  const renderLifecycleMilestoneStrip = (loan, currentStage = 'all') => {
+    const m = getLoanMilestones(loan);
+
+    const stages = [
+      {
+        id: 'lead',
+        key: 'lead_date',
+        num: '1',
+        title: 'Lead Date',
+        subtitle: 'Origination & Inquiry',
+        date: m.leadDate,
+        isCurrentDoc: currentStage === 'lead',
+        status: m.hasLead ? 'Originated' : 'Pending',
+        badgeColor: 'text-amber-800 bg-amber-50 dark:bg-amber-950/50 border-amber-300 dark:border-amber-800'
+      },
+      {
+        id: 'application',
+        key: 'application_date',
+        num: '2',
+        title: 'Application Date',
+        subtitle: '6-Step Dossier Filing',
+        date: m.applicationDate,
+        isCurrentDoc: currentStage === 'application',
+        status: m.hasApp ? 'Filed' : 'Draft',
+        badgeColor: 'text-blue-800 bg-blue-50 dark:bg-blue-950/50 border-blue-300 dark:border-blue-800'
+      },
+      {
+        id: 'approval',
+        key: 'approval_date',
+        num: '3',
+        title: 'Approval Date',
+        subtitle: 'Sanction & Credit Approval',
+        date: m.approvalDate,
+        isCurrentDoc: currentStage === 'approval' || currentStage === 'sanction',
+        status: m.hasApproval ? 'Sanctioned' : (loan?.status === 'Rejected' ? 'Rejected' : 'Under Review'),
+        badgeColor: m.hasApproval 
+          ? 'text-indigo-800 bg-indigo-50 dark:bg-indigo-950/50 border-indigo-300 dark:border-indigo-800'
+          : 'text-slate-600 bg-slate-100 dark:bg-slate-800 border-slate-300'
+      },
+      {
+        id: 'disbursal',
+        key: 'disbursal_date',
+        num: '4',
+        title: 'Disbursal Date',
+        subtitle: 'Fund Remittance & Value Date',
+        date: m.disbursalDate,
+        isCurrentDoc: currentStage === 'disbursal',
+        status: m.hasDisbursal ? 'Disbursed' : 'Awaiting Disbursal',
+        badgeColor: m.hasDisbursal
+          ? 'text-emerald-800 bg-emerald-50 dark:bg-emerald-950/50 border-emerald-300 dark:border-emerald-800'
+          : 'text-slate-600 bg-slate-100 dark:bg-slate-800 border-slate-300'
+      }
+    ];
+
+    return (
+      <div className="rounded-xl border border-slate-200 dark:border-slate-800 print:border-slate-300 bg-slate-50/70 dark:bg-slate-950/50 print:bg-white p-2.5 sm:p-3 space-y-1.5">
+        <div className="flex items-center justify-between text-[11px] font-bold text-slate-700 dark:text-slate-300 print:text-black uppercase tracking-wider">
+          <span className="flex items-center space-x-1.5">
+            <Calendar className="h-3.5 w-3.5 text-teal-600 print:text-black" />
+            <span>Document Milestone Timeline & Audit Trail</span>
+          </span>
+          <span className="text-[10px] text-slate-400 print:text-slate-600 font-semibold lowercase">
+            institutional compliance record
+          </span>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {stages.map((st) => (
+            <div 
+              key={st.id}
+              className={`p-2 rounded-lg border text-left transition-all ${
+                st.isCurrentDoc
+                  ? 'bg-teal-50/90 dark:bg-teal-950/40 border-teal-500/70 ring-1 ring-teal-500/50 print:bg-slate-50 print:border-black'
+                  : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 print:bg-white print:border-slate-300'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-1 mb-0.5">
+                <span className="text-[9px] font-mono font-extrabold text-slate-400 print:text-slate-500">
+                  STAGE #{st.num}
+                </span>
+                <span className={`text-[8.5px] font-bold px-1.5 py-0.2 rounded border ${st.badgeColor} print:border-none print:bg-transparent print:text-black`}>
+                  {st.status}
+                </span>
+              </div>
+              <p className="text-[10px] font-extrabold uppercase text-slate-800 dark:text-slate-200 print:text-black leading-tight">
+                {st.title}
+              </p>
+              <p className="text-[11px] font-black font-mono text-teal-700 dark:text-teal-400 print:text-black mt-0.5">
+                {st.date}
+              </p>
+              <p className="text-[8.5px] text-slate-400 print:text-slate-600 leading-none mt-0.5 truncate">
+                {st.subtitle}
+              </p>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   const handleCopy = (text, fieldName) => {
     if (!text) return;
     navigator.clipboard.writeText(text);
@@ -522,8 +688,12 @@ export default function LoansPage() {
   };
 
   useEffect(() => {
-    checkDraft();
-  }, [showModal]);
+    if (!editingLoanId) {
+      checkDraft();
+    } else {
+      setHasExistingDraft(false);
+    }
+  }, [showModal, editingLoanId]);
 
   const handleSaveDraft = () => {
     try {
@@ -581,6 +751,7 @@ export default function LoansPage() {
  const [showApproveModal, setShowApproveModal] = useState(false);
  const [selectedApproveLoan, setSelectedApproveLoan] = useState(null);
  const [approvalNotes, setApprovalNotes] = useState('');
+ const [approvalDate, setApprovalDate] = useState(new Date().toISOString().split('T')[0]);
  const [approving, setApproving] = useState(false);
 
  const [showRejectModal, setShowRejectModal] = useState(false);
@@ -780,6 +951,8 @@ export default function LoansPage() {
     guarantor_pin: '',
 
     // Step 4: Loan Details & Repayment Terms
+    lead_date: new Date().toISOString().split('T')[0],
+    application_date: new Date().toISOString().split('T')[0],
     loan_purpose_code: 'MICRO',
     loan_purpose_title: 'Microfinance Loan',
     loan_amount: '50000',
@@ -809,7 +982,8 @@ export default function LoansPage() {
     doc_co_aadhaar: '',
     doc_guarantor_aadhaar: '',
     terms_accepted: false,
-    additional_notes: ''
+    additional_notes: '',
+    lead_id: null
   };
 
   const [formData, setFormData] = useState(emptyFormData);
@@ -826,14 +1000,20 @@ export default function LoansPage() {
     if (location.state && location.state.prefillLead) {
       const lead = location.state.prefillLead;
       const amountVal = Math.min(200000, parseFloat(lead.amount || 50000)).toString();
+      const rawLeadDate = lead.lead_date || (lead.created_at ? lead.created_at.split('T')[0].split(' ')[0] : new Date().toISOString().split('T')[0]);
       setFormData(prev => ({
         ...prev,
+        lead_id: lead.id || lead.lead_id || lead.appointment_id || null,
         customer_name: lead.name || prev.customer_name,
         phone: lead.phone || prev.phone,
         loan_amount: amountVal,
         address: lead.city || prev.address,
-        aadhaar_number: lead.aadhaar || prev.aadhaar_number
+        aadhaar_number: lead.aadhaar || prev.aadhaar_number,
+        lead_date: rawLeadDate,
+        application_date: new Date().toISOString().split('T')[0],
+        reference_name: lead.reference_name || prev.reference_name
       }));
+      setEditingLoanId(null);
       setShowModal(true);
       setCurrentStep(1);
       // Clear the state so it doesn't reopen on refresh
@@ -841,7 +1021,101 @@ export default function LoansPage() {
     }
   }, [location.state, location.pathname, navigate]);
 
- const fetchLoans = async () => {
+  const handleOpenCreateModal = () => {
+    setEditingLoanId(null);
+    setFormData(emptyFormData);
+    setDocMeta({});
+    setCurrentStep(1);
+    setShowModal(true);
+  };
+
+  const handleOpenEditModal = (loan) => {
+    if (!loan) return;
+    if (loan.status === 'Approved' || loan.status === 'Active' || loan.status === 'Closed') {
+      alert(`This loan application is formally ${loan.status} and cannot be edited. Approved and active records are legally locked.`);
+      return;
+    }
+
+    setEditingLoanId(loan.id);
+    setFormData({
+      ...emptyFormData,
+      customer_name: loan.customer_name || '',
+      father_husband_name: loan.father_husband_name || '',
+      phone: loan.phone || '',
+      alternate_phone: loan.alternate_phone || '',
+      dob: loan.dob || '',
+      gender: loan.gender || 'Male',
+      aadhaar_number: loan.aadhaar_number || '',
+      pan_number: loan.pan_number || '',
+      address: loan.address || '',
+      district: loan.district || '',
+      state: loan.state || 'Haryana',
+      pin_code: loan.pin_code || '',
+
+      co_applicant_name: loan.co_applicant_name || '',
+      co_applicant_father_husband: loan.co_applicant_father_husband || '',
+      co_applicant_phone: loan.co_applicant_phone || '',
+      co_applicant_dob: loan.co_applicant_dob || '',
+      co_applicant_gender: loan.co_applicant_gender || 'Male',
+      co_applicant_aadhaar: loan.co_applicant_aadhaar || '',
+      co_applicant_pan: loan.co_applicant_pan || '',
+      co_applicant_address: loan.co_applicant_address || '',
+      co_applicant_district: loan.co_applicant_district || '',
+      co_applicant_state: loan.co_applicant_state || 'Haryana',
+      co_applicant_pin: loan.co_applicant_pin || '',
+
+      guarantor_name: loan.guarantor_name || '',
+      guarantor_father_husband: loan.guarantor_father_husband || '',
+      guarantor_phone: loan.guarantor_phone || '',
+      guarantor_dob: loan.guarantor_dob || '',
+      guarantor_gender: loan.guarantor_gender || 'Male',
+      guarantor_aadhaar: loan.guarantor_aadhaar || '',
+      guarantor_pan: loan.guarantor_pan || '',
+      guarantor_address: loan.guarantor_address || '',
+      guarantor_district: loan.guarantor_district || '',
+      guarantor_state: loan.guarantor_state || 'Haryana',
+      guarantor_pin: loan.guarantor_pin || '',
+
+      lead_date: loan.lead_date || (loan.created_at ? loan.created_at.split('T')[0].split(' ')[0] : new Date().toISOString().split('T')[0]),
+      application_date: loan.application_date || (loan.created_at ? loan.created_at.split('T')[0].split(' ')[0] : new Date().toISOString().split('T')[0]),
+      loan_purpose_code: loan.loan_purpose_code || 'MICRO',
+      loan_purpose_title: loan.loan_purpose_title || 'Microfinance Loan',
+      loan_amount: loan.loan_amount ? Math.ceil(parseFloat(loan.loan_amount)).toString() : '50000',
+      interest_rate: loan.interest_rate ? parseFloat(loan.interest_rate).toString() : '14.5',
+      tenure_months: loan.tenure_months ? parseInt(loan.tenure_months).toString() : '24',
+
+      employment_type: loan.employment_type || 'Salaried',
+      occupation: loan.occupation || '',
+      monthly_income_range: loan.monthly_income_range || 'Rs. 5,000 - Rs. 15,000',
+      earning_members: loan.earning_members?.toString() || '1',
+      bank_account_no: loan.bank_account_no || '',
+      bank_ifsc: loan.bank_ifsc || '',
+      bank_micr: loan.bank_micr || '',
+      bank_name: loan.bank_name || '',
+      account_holder_name: loan.account_holder_name || loan.customer_name || '',
+      reference_name: loan.reference_name || '',
+      reference_phone: loan.reference_phone || '',
+      reference_relation: loan.reference_relation || '',
+
+      doc_aadhaar: loan.doc_aadhaar || '',
+      doc_pan: loan.doc_pan || '',
+      doc_photo: loan.doc_photo || '',
+      doc_passbook: loan.doc_passbook || '',
+      doc_address_proof: loan.doc_address_proof || '',
+      doc_co_aadhaar: loan.doc_co_aadhaar || '',
+      doc_guarantor_aadhaar: loan.doc_guarantor_aadhaar || '',
+      terms_accepted: true,
+      additional_notes: loan.additional_notes || '',
+      lead_id: loan.lead_id || null,
+      loan_no: loan.loan_no || '',
+      agreement_no: loan.agreement_no || ''
+    });
+    setDocMeta({});
+    setCurrentStep(1);
+    setShowModal(true);
+  };
+
+  const fetchLoans = async () => {
  setLoading(true);
  try {
  const res = await api.get(`loans?status=${statusFilter}&search=${search}`);
@@ -1146,12 +1420,38 @@ export default function LoansPage() {
     try {
       const payload = {
         ...formData,
+        lead_date: formData.lead_date || new Date().toISOString().split('T')[0],
+        application_date: formData.application_date || new Date().toISOString().split('T')[0],
         loan_purpose_code: formData.loan_purpose_code || 'MICRO',
         loan_purpose_title: formData.loan_purpose_title || 'Microfinance Loan',
         account_holder_name: formData.account_holder_name?.trim() || formData.customer_name
       };
+
+      if (editingLoanId) {
+        payload.id = editingLoanId;
+        const res = await api.put('loans', payload);
+        if (res.success) {
+          setShowModal(false);
+          setEditingLoanId(null);
+          setFormData(emptyFormData);
+          setDocMeta({});
+          fetchLoans();
+          alert('Loan Application #' + (res.data?.loan?.agreement_no || res.data?.loan?.loan_no || formData.loan_no || '') + ' updated successfully.');
+        } else {
+          alert(res.message || 'Error updating loan application');
+        }
+        return;
+      }
+
       const res = await api.post('loans', payload);
       if (res.success) {
+        if (formData.lead_id) {
+          try {
+            await api.put('appointments/status', { id: formData.lead_id, status: 'Approved' });
+          } catch (e) {
+            console.error('Failed to update lead status upon loan confirmation:', e);
+          }
+        }
         setShowModal(false);
         setCurrentStep(1);
         const createdLoanData = {
@@ -1181,6 +1481,8 @@ export default function LoansPage() {
           guarantor_phone: formData.guarantor_phone,
           guarantor_aadhaar: formData.guarantor_aadhaar,
           guarantor_pan: formData.guarantor_pan,
+          lead_date: formData.lead_date || new Date().toISOString().split('T')[0],
+          application_date: formData.application_date || new Date().toISOString().split('T')[0],
           loan_purpose_code: formData.loan_purpose_code,
           loan_purpose_title: formData.loan_purpose_title,
           loan_amount: formData.loan_amount,
@@ -1233,6 +1535,7 @@ export default function LoansPage() {
     try {
       const res = await api.post('loans/approve', {
         id: selectedApproveLoan.id,
+        approval_date: approvalDate || new Date().toISOString().split('T')[0],
         notes: approvalNotes || (isManager ? 'Sanctioned by Branch Manager' : 'Sanctioned by Administrator')
       });
       if (res.success) {
@@ -1316,7 +1619,7 @@ export default function LoansPage() {
     if (!loan) return;
     const rawPhone = loan.phone || '';
     const cleanPhone = rawPhone.replace(/\D/g, '').slice(-10);
-    const instName = settings?.institution_name || 'Kaspr Microfinance';
+    const instName = settings?.institution_name || 'Microfinance Institution';
     const lines = [
       `*${instName.toUpperCase()}*`,
       `*OFFICIAL LOAN DISBURSEMENT ADVICE*`,
@@ -1343,17 +1646,6 @@ export default function LoansPage() {
       : `https://wa.me/?text=${encodeURIComponent(message)}`;
     window.open(url, '_blank');
   };
-
- const loanPurposes = [
- { code: 'AH', title: 'Animal Husbandry Loan', desc: 'Cow, buffalo, goat' },
- { code: 'HR', title: 'Home Repair', desc: 'Repair or improvement' },
- { code: 'SB', title: 'Small Business', desc: 'Shop or startup' },
- { code: 'RC', title: 'Rickshaw or Cart', desc: 'Livelihood support' },
- { code: 'WE', title: 'Women Empowerment', desc: 'Women entrepreneurs' },
- { code: 'AG', title: 'Agriculture Loan', desc: 'Farming needs' },
- { code: 'ED', title: 'Education Loan', desc: "Children's education" },
- { code: 'OT', title: 'Other Purpose', desc: 'Any other need' }
- ];
 
  const steps = [
  { num: 1, label: 'Personal', icon: User },
@@ -1407,7 +1699,7 @@ export default function LoansPage() {
      {/* New Loan Application */}
      <button
        type="button"
-       onClick={() => { setFormData(emptyFormData); setCurrentStep(1); setShowModal(true); }}
+       onClick={handleOpenCreateModal}
        className="teal-btn cursor-pointer whitespace-nowrap"
      >
        <Plus className="h-4 w-4" />
@@ -1458,7 +1750,6 @@ export default function LoansPage() {
   <th className="py-2 px-2.5">Agreement & Cust ID</th>
   <th className="py-2 px-2.5">Name</th>
   <th className="py-2 px-2.5">Mobile</th>
-  <th className="py-2 px-2.5">Loan Type</th>
   <th className="py-2 px-2.5">Loan Amount</th>
   <th className="py-2 px-2.5">Status</th>
   <th className="py-2 px-2.5">EMI</th>
@@ -1466,8 +1757,7 @@ export default function LoansPage() {
   <th className="py-2 px-2.5">Received EMI</th>
   <th className="py-2 px-2.5">Pending EMI</th>
   <th className="py-2 px-2.5">Received</th>
-  <th className="py-2 px-2.5">P/L</th>
-  <th className="py-2 px-2.5">Date</th>
+  {isAdmin && <th className="py-2 px-2.5">P/L</th>}
   <th className="py-2 px-2.5 text-right">Action</th>
   </tr>
   </thead>
@@ -1492,7 +1782,7 @@ export default function LoansPage() {
      type="button"
      onClick={() => { setSelectedAgreementLoan(loan); setAgreementModalTab('application'); setShowAgreementModal(true); }}
      className="text-left group cursor-pointer"
-     title="Click to view full Agreement & Customer ID Document"
+     title="Click to view full Application Dossier & KYC Document"
    >
      <div className="font-bold font-mono text-indigo-600 dark:text-indigo-400 group-hover:underline">
        {loan.agreement_no || loan.loan_no}
@@ -1504,17 +1794,17 @@ export default function LoansPage() {
  </td>
  <td className="py-2 px-2.5 font-bold text-slate-900 dark:text-white uppercase">{loan.customer_name}</td>
  <td className="py-2 px-2.5 text-slate-700 dark:text-slate-200 font-medium">{loan.phone}</td>
- <td className="py-2 px-2.5 text-slate-600 dark:text-slate-300 font-medium">{loan.loan_purpose_title || loan.loan_category || 'Home Repair'}</td>
  <td className="py-2 px-2.5 font-bold text-slate-900 dark:text-white">₹{loanAmount.toLocaleString()}</td>
  <td className="py-2 px-2.5">
  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
-   loan.status === 'Pending Approval' ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300 dark:border-amber-800' :
+   (loan.status === 'Pending Approval' || loan.status === 'Draft' || loan.status === 'Pending') ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300 dark:border-amber-800' :
    loan.status === 'Approved' ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300 border border-indigo-300 dark:border-indigo-800' :
    loan.status === 'Rejected' ? 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300 border border-rose-300 dark:border-rose-800' :
    loan.status === 'Closed' ? 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300' :
    'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800'
  }`}>
    {loan.status === 'Pending Approval' ? 'Pending Approval' :
+    (loan.status === 'Draft' || loan.status === 'Pending') ? 'Draft' :
     loan.status === 'Approved' ? 'Approved' :
     loan.status || 'Active'}
  </span>
@@ -1524,110 +1814,148 @@ export default function LoansPage() {
  <td className="py-2 px-2.5 font-bold text-emerald-600">{receivedCount}/{tenure}</td>
  <td className="py-2 px-2.5 font-bold text-teal-600">{pendingCount}</td>
  <td className="py-2 px-2.5 font-extrabold text-emerald-700">₹{actualReceived.toLocaleString()}</td>
- <td className={`py-2 px-2.5 font-extrabold ${profitLoss >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
- {profitLoss >= 0 ? '+' : ''}₹{profitLoss.toLocaleString()}
- </td>
- <td className="py-2 px-2.5 text-slate-500 dark:text-slate-400 font-medium whitespace-nowrap">
- {loan.created_at ? new Date(loan.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '24 Jul 2026, 04:18 PM'}
- </td>
- <td className="py-2 px-2.5 text-right space-x-1 whitespace-nowrap">
- {loan.status === 'Pending Approval' && (
-   (isAdmin || isManager) ? (
-     <>
-       <button
-         onClick={() => {
-           setSelectedApproveLoan(loan);
-           setApprovalNotes(isManager ? 'Sanctioned by Branch Manager' : 'Verified and sanctioned by Administrator');
-           setShowApproveModal(true);
-         }}
-         className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-xs cursor-pointer"
-         title="Approve Loan Application"
-       >
-         <Check className="h-3.5 w-3.5" />
-         <span>Approve</span>
-       </button>
-       <button
-         onClick={() => {
-           setSelectedRejectLoan(loan);
-           setRejectReason('');
-           setShowRejectModal(true);
-         }}
-         className="inline-flex items-center space-x-1 px-2 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:text-rose-300 text-xs font-semibold transition-colors cursor-pointer border border-rose-200 dark:border-rose-800"
-         title="Reject Loan Application"
-       >
-         <X className="h-3.5 w-3.5" />
-         <span>Reject</span>
-       </button>
-     </>
-   ) : (
-     <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
-       Under Review
-     </span>
-   )
+ {isAdmin && (
+   <td className={`py-2 px-2.5 font-extrabold ${profitLoss >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+     {profitLoss >= 0 ? '+' : ''}₹{profitLoss.toLocaleString()}
+   </td>
  )}
- {loan.status === 'Approved' && (
-   isAdmin ? (
-     <button
-       onClick={() => {
-         setSelectedDisburseLoan(loan);
-         setDisbursementData({
-           ...disbursementData,
-           disbursement_date: new Date().toISOString().split('T')[0]
-         });
-         setShowDisburseModal(true);
-       }}
-       className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-xs cursor-pointer"
-       title="Disburse Funds directly to borrower bank account"
-     >
-       <DollarSign className="h-3.5 w-3.5" />
-       <span>Disburse</span>
-     </button>
-   ) : (
-     <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
-       Ready for Payout
-     </span>
-   )
- )}
- <button
-   onClick={() => { setSelectedAgreementLoan(loan); setAgreementModalTab('agreement'); setShowAgreementModal(true); }}
-   className="inline-flex items-center space-x-1 px-2 py-1 rounded-lg bg-teal-50 hover:bg-teal-100 dark:bg-teal-950/40 dark:hover:bg-teal-900/50 text-teal-700 dark:text-teal-300 text-xs font-semibold transition-colors cursor-pointer border border-teal-200/60 dark:border-teal-800/60"
-   title="View and Print Official Loan Agreement"
- >
-   <FileText className="h-3.5 w-3.5" />
-   <span>Agreement</span>
- </button>
- {(loan.status === 'Active' || loan.disbursement_date) && (
-   <button
-     onClick={() => handleSendDisbursalWhatsApp(loan)}
-     className="inline-flex items-center space-x-1 px-2 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 text-xs font-semibold transition-colors cursor-pointer border border-emerald-200/60 dark:border-emerald-800/60"
-     title="Send Agreement No & Customer ID via WhatsApp"
-   >
-     <Share2 className="h-3.5 w-3.5" />
-     <span>WhatsApp</span>
-   </button>
- )}
- <button
- onClick={() => { setSelectedKfsLoan(loan); setShowKfsModal(true); }}
- className="inline-flex items-center space-x-1 px-2 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold transition-colors cursor-pointer"
- >
- <FileCheck className="h-3.5 w-3.5" />
- <span>View KFS</span>
- </button>
- <button
- onClick={() => navigate(`/emi-report?loan_id=${loan.id}`)}
- className="inline-flex items-center space-x-1 px-2 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 text-xs font-semibold transition-colors cursor-pointer border border-emerald-200/60 dark:border-emerald-800/60"
- title="View Statement of Account (SOA) with Full History, Co-Applicant & Guarantor Details"
- >
- <FileText className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
- <span>SOA</span>
- </button>
- </td>
+  <td className="py-2 px-2.5 text-right whitespace-nowrap">
+    <ActionDropdown
+      label="Actions"
+      menuWidth={250}
+      items={[
+        // Decision & Approval Group
+        (loan.status === 'Pending Approval' || loan.status === 'Approved') && {
+          header: 'Loan Decision & Payout'
+        },
+        loan.status === 'Pending Approval' && (isAdmin || isManager) && {
+          label: 'Approve Loan',
+          subLabel: 'Verify & sanction application',
+          icon: Check,
+          iconColor: 'text-emerald-600 dark:text-emerald-400',
+          badge: 'Sanction',
+          badgeColor: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300',
+          onClick: () => {
+            setSelectedApproveLoan(loan);
+            setApprovalNotes(isManager ? 'Sanctioned by Branch Manager' : 'Verified and sanctioned by Administrator');
+            setShowApproveModal(true);
+          }
+        },
+        loan.status === 'Pending Approval' && (isAdmin || isManager) && {
+          label: 'Reject Application',
+          subLabel: 'Decline and record reason',
+          icon: X,
+          iconColor: 'text-rose-600 dark:text-rose-400',
+          danger: true,
+          onClick: () => {
+            setSelectedRejectLoan(loan);
+            setRejectReason('');
+            setShowRejectModal(true);
+          }
+        },
+        loan.status === 'Pending Approval' && !isAdmin && !isManager && {
+          label: 'Under Review',
+          subLabel: 'Awaiting manager approval',
+          icon: Clock,
+          disabled: true
+        },
+        // Pre-Approval Edit (Permitted only before sanction)
+        (loan.status === 'Pending Approval' || loan.status === 'Draft' || loan.status === 'Pending') && {
+          label: 'Edit Application',
+          subLabel: 'Modify terms & borrower details',
+          icon: Edit3,
+          iconColor: 'text-amber-600 dark:text-amber-400',
+          badge: 'Editable',
+          badgeColor: 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300',
+          onClick: () => handleOpenEditModal(loan)
+        },
+        loan.status === 'Approved' && isAdmin && {
+          label: 'Disburse Funds',
+          subLabel: 'Release funds & record UTR',
+          icon: DollarSign,
+          iconColor: 'text-indigo-600 dark:text-indigo-400',
+          badge: 'Payout',
+          badgeColor: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/70 dark:text-indigo-300',
+          onClick: () => {
+            setSelectedDisburseLoan(loan);
+            setDisbursementData({
+              ...disbursementData,
+              disbursement_date: new Date().toISOString().split('T')[0]
+            });
+            setShowDisburseModal(true);
+          }
+        },
+        loan.status === 'Approved' && !isAdmin && {
+          label: 'Ready for Payout',
+          subLabel: 'Waiting admin disbursement',
+          icon: Clock,
+          disabled: true
+        },
+        // Post-Approval Lock Indicator
+        (loan.status === 'Approved' || loan.status === 'Active' || loan.status === 'Closed') && {
+          label: 'Application Locked',
+          subLabel: 'Non-editable post-approval',
+          icon: Lock,
+          iconColor: 'text-slate-400 dark:text-slate-500',
+          badge: 'Locked',
+          badgeColor: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400',
+          disabled: true
+        },
+        (loan.status === 'Pending Approval' || loan.status === 'Approved') && {
+          divider: true
+        },
+
+        // Official Documents Group
+        { header: 'Official Documents' },
+        {
+          label: 'Loan Agreement',
+          subLabel: 'Print legally binding contract',
+          icon: FileText,
+          iconColor: 'text-teal-600 dark:text-teal-400',
+          onClick: () => {
+            setSelectedAgreementLoan(loan);
+            setAgreementModalTab('agreement');
+            setShowAgreementModal(true);
+          }
+        },
+
+        // Statements & Repayment Group
+        { divider: true },
+        { header: 'Repayment & Statement' },
+        {
+          label: 'Statement of Account (SOA)',
+          subLabel: 'Full EMI schedule & receipt history',
+          icon: FileSpreadsheet,
+          iconColor: 'text-emerald-600 dark:text-emerald-400',
+          onClick: () => navigate(`/emi-report?loan_id=${loan.id}`)
+        },
+        (loan.status === 'Active' || loan.status === 'Approved') && {
+          label: 'Repayment',
+          subLabel: 'Record installment receipt',
+          icon: Receipt,
+          iconColor: 'text-teal-600 dark:text-teal-400',
+          onClick: () => navigate('/emis', { state: { preselectLoanId: loan.id } })
+        },
+
+        // Communication
+        (loan.status === 'Active' || loan.disbursement_date) && { divider: true },
+        (loan.status === 'Active' || loan.disbursement_date) && { header: 'Borrower Communication' },
+        (loan.status === 'Active' || loan.disbursement_date) && {
+          label: 'WhatsApp Loan Notice',
+          subLabel: 'Share agreement ID & portal details',
+          icon: MessageCircle,
+          iconColor: 'text-emerald-600 dark:text-emerald-400',
+          onClick: () => handleSendDisbursalWhatsApp(loan)
+        }
+      ]}
+    />
+  </td>
  </tr>
  );
  })
  ) : (
   <tr>
-  <td colSpan="15" className="py-12 text-center text-slate-400 dark:text-slate-500">
+  <td colSpan={isAdmin ? 13 : 12} className="py-12 text-center text-slate-400 dark:text-slate-500">
     <div className="flex flex-col items-center justify-center space-y-3">
       <FileSpreadsheet className="h-10 w-10 text-slate-300 dark:text-slate-600" />
       <div>
@@ -1650,7 +1978,7 @@ export default function LoansPage() {
         )}
         <button
           type="button"
-          onClick={() => { setFormData(emptyFormData); setCurrentStep(1); setShowModal(true); }}
+          onClick={handleOpenCreateModal}
           className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-xs cursor-pointer"
         >
           <Plus className="h-3.5 w-3.5" />
@@ -1689,28 +2017,31 @@ export default function LoansPage() {
         <div className="p-6 print:p-4 space-y-3.5 text-xs font-sans text-slate-900 dark:text-white leading-relaxed max-h-[75vh] print:max-h-none overflow-y-auto print:overflow-visible print:text-black">
           {/* Header Letterhead (Printed) */}
           <div className="text-center border-b border-slate-200 dark:border-slate-700 print:border-slate-400 pb-3">
-            <h2 className="text-base font-extrabold text-slate-900 dark:text-white print:text-black uppercase tracking-tight">{settings.institution_name?.toUpperCase() || 'KASPR GROUP OF MICROFINANCE'}</h2>
+            <h2 className="text-base font-extrabold text-slate-900 dark:text-white print:text-black uppercase tracking-tight">{settings.institution_name?.toUpperCase() || 'MICROFINANCE INSTITUTION'}</h2>
             <p className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 print:text-slate-700">{settings.tagline || 'Registered Non-Banking Financial Company (NBFC - MFI)'}</p>
             <p className="text-[10px] font-bold text-indigo-700 print:text-black mt-1 uppercase">Key Fact Statement (KFS) under RBI Master Direction 2026</p>
           </div>
 
+          {/* Milestone Strip */}
+          {renderLifecycleMilestoneStrip(selectedKfsLoan, 'kfs')}
+
           {/* Borrower Details Table */}
-          <div className="grid grid-cols-2 gap-4 bg-slate-50 dark:bg-slate-950 print:bg-slate-50 p-3 rounded-xl border border-slate-200 dark:border-slate-700 print:border-slate-300">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 dark:bg-slate-950 print:bg-slate-50 p-3 rounded-xl border border-slate-200 dark:border-slate-700 print:border-slate-300">
             <div>
               <p className="text-[10px] text-slate-400 print:text-slate-600 font-semibold uppercase">Loan Application No</p>
               <p className="font-mono font-bold text-indigo-600 print:text-black">{selectedKfsLoan.loan_no}</p>
             </div>
             <div>
+              <p className="text-[10px] text-slate-400 print:text-slate-600 font-semibold uppercase">Agreement No</p>
+              <p className="font-mono font-bold text-teal-600 print:text-black">{selectedKfsLoan.agreement_no || selectedKfsLoan.loan_no}</p>
+            </div>
+            <div>
               <p className="text-[10px] text-slate-400 print:text-slate-600 font-semibold uppercase">Borrower Name</p>
-              <p className="font-bold text-slate-900 dark:text-white print:text-black">{selectedKfsLoan.customer_name}</p>
+              <p className="font-bold text-slate-900 dark:text-white print:text-black uppercase">{selectedKfsLoan.customer_name}</p>
             </div>
             <div>
               <p className="text-[10px] text-slate-400 print:text-slate-600 font-semibold uppercase">Contact Phone</p>
               <p className="font-semibold text-slate-800 dark:text-slate-100 print:text-black">{selectedKfsLoan.phone}</p>
-            </div>
-            <div>
-              <p className="text-[10px] text-slate-400 print:text-slate-600 font-semibold uppercase">Aadhaar Number</p>
-              <p className="font-mono font-medium text-slate-800 dark:text-slate-100 print:text-black">{selectedKfsLoan.aadhaar_number || 'N/A'}</p>
             </div>
           </div>
 
@@ -1763,7 +2094,7 @@ export default function LoansPage() {
             </div>
             <div className="border-t border-dashed border-slate-400 pt-2">
               <p className="font-bold text-slate-900 dark:text-white print:text-black">{settings.signatory_name || 'Authorized NBFC Officer'}</p>
-              <p className="text-[10px] text-slate-400 print:text-slate-600">{settings.signatory_title ? `${settings.signatory_title} - ${settings.institution_name}` : (settings.institution_name || 'Kaspr Group of Microfinance')}</p>
+              <p className="text-[10px] text-slate-400 print:text-slate-600">{settings.signatory_title ? `${settings.signatory_title} - ${settings.institution_name || 'Institution'}` : (settings.institution_name || 'Authorized Signatory')}</p>
             </div>
           </div>
         </div>
@@ -1912,12 +2243,32 @@ export default function LoansPage() {
                 {selectedApproveLoan.tenure_months} Months • ₹{parseFloat(selectedApproveLoan.emi_amount || 0).toLocaleString()}/month
               </span>
             </div>
+            <div className="flex justify-between items-center pb-2 border-b border-slate-200 dark:border-slate-800">
+              <span className="text-slate-500 dark:text-slate-400 font-medium">Application & Lead Dates:</span>
+              <span className="font-semibold text-slate-800 dark:text-slate-200">
+                App: {formatDocDate(selectedApproveLoan.application_date || selectedApproveLoan.created_at)} • Lead: {formatDocDate(selectedApproveLoan.lead_date || selectedApproveLoan.application_date || selectedApproveLoan.created_at)}
+              </span>
+            </div>
             <div className="flex justify-between items-center">
               <span className="text-slate-500 dark:text-slate-400 font-medium">Borrower Bank Account:</span>
               <span className="font-semibold text-slate-800 dark:text-slate-200">
                 {selectedApproveLoan.bank_name || 'Bank'} ({selectedApproveLoan.bank_account_no || 'N/A'})
               </span>
             </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 dark:text-slate-200 uppercase mb-1 flex items-center justify-between">
+              <span>Official Sanction / Approval Date <span className="text-rose-500">*</span></span>
+              <span className="text-[10px] text-slate-400 font-normal">Credit Sanction Effective Date</span>
+            </label>
+            <input
+              type="date"
+              required
+              value={approvalDate}
+              onChange={(e) => setApprovalDate(e.target.value)}
+              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 text-xs text-slate-900 dark:text-white font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            />
           </div>
 
           <div>
@@ -2352,9 +2703,15 @@ export default function LoansPage() {
                 <h3 className="font-bold text-sm sm:text-base text-white">
                   {agreementModalTab === 'application' 
                     ? 'Complete Loan Application Dossier' 
+                    : agreementModalTab === 'sanction'
+                    ? 'Official Loan Sanction Letter'
+                    : agreementModalTab === 'kfs'
+                    ? 'RBI Key Fact Statement (KFS)'
                     : agreementModalTab === 'agreement' 
                     ? 'Official Sanction Agreement Contract' 
-                    : 'Repayment Amortization Schedule'}
+                    : agreementModalTab === 'schedule'
+                    ? 'Repayment Amortization Schedule'
+                    : 'Disbursement Advice & Payout Voucher'}
                 </h3>
                 <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold ${
                   selectedAgreementLoan.status === 'Pending Approval' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' :
@@ -2371,13 +2728,38 @@ export default function LoansPage() {
             </div>
           </div>
           <div className="flex items-center space-x-2 sm:space-x-3">
+            {agreementModalTab === 'application' && (selectedAgreementLoan.status === 'Pending Approval' || selectedAgreementLoan.status === 'Draft' || selectedAgreementLoan.status === 'Pending') && (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAgreementModal(false);
+                  handleOpenEditModal(selectedAgreementLoan);
+                }}
+                className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-900 text-xs font-bold shadow-md shadow-amber-500/20 cursor-pointer transition-colors"
+                title="Edit application details before sanctioning"
+              >
+                <Edit3 className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Edit Application</span>
+              </button>
+            )}
+            {agreementModalTab === 'application' && (selectedAgreementLoan.status === 'Approved' || selectedAgreementLoan.status === 'Active' || selectedAgreementLoan.status === 'Closed') && (
+              <span className="hidden sm:inline-flex items-center space-x-1 px-2.5 py-1 rounded-xl bg-slate-800 text-slate-300 text-xs font-semibold border border-slate-700" title="This application has been formally approved and locked from edits">
+                <Lock className="h-3 w-3 text-slate-400" />
+                <span>Locked Post-Approval</span>
+              </span>
+            )}
             <button
               onClick={() => window.print()}
               className="inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold shadow-md shadow-teal-600/20 cursor-pointer transition-colors"
             >
               <Printer className="h-3.5 w-3.5" />
               <span className="hidden sm:inline">
-                {agreementModalTab === 'application' ? 'Print Application' : agreementModalTab === 'agreement' ? 'Print Agreement' : 'Print Schedule'}
+                {agreementModalTab === 'application' ? 'Print Application' : 
+                 agreementModalTab === 'sanction' ? 'Print Sanction Letter' :
+                 agreementModalTab === 'kfs' ? 'Print KFS' :
+                 agreementModalTab === 'agreement' ? 'Print Agreement' : 
+                 agreementModalTab === 'schedule' ? 'Print Schedule' :
+                 'Print Payout Advice'}
               </span>
               <span className="sm:hidden">Print</span>
             </button>
@@ -2399,7 +2781,7 @@ export default function LoansPage() {
             }`}
           >
             <FileText className="h-3.5 w-3.5" />
-            <span>Complete Application (All 6 Steps)</span>
+            <span>Application Dossier</span>
             {(() => {
               const audit = getLoanPendingAudit(selectedAgreementLoan);
               return (
@@ -2408,10 +2790,36 @@ export default function LoansPage() {
                     ? 'bg-emerald-500 text-white' 
                     : 'bg-amber-400 text-slate-900'
                 }`}>
-                  {audit.isComplete ? '100% Complete' : `${audit.pendingMandatory.length} Pending`}
+                  {audit.isComplete ? '100%' : `${audit.pendingMandatory.length} P`}
                 </span>
               );
             })()}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setAgreementModalTab('sanction')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer whitespace-nowrap ${
+              agreementModalTab === 'sanction'
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'text-slate-300 hover:text-white hover:bg-slate-700/60'
+            }`}
+          >
+            <FileCheck className="h-3.5 w-3.5" />
+            <span>Sanction Letter</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setAgreementModalTab('kfs')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer whitespace-nowrap ${
+              agreementModalTab === 'kfs'
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'text-slate-300 hover:text-white hover:bg-slate-700/60'
+            }`}
+          >
+            <Shield className="h-3.5 w-3.5" />
+            <span>RBI KFS</span>
           </button>
 
           <button
@@ -2424,7 +2832,7 @@ export default function LoansPage() {
             }`}
           >
             <FileCheck className="h-3.5 w-3.5" />
-            <span>Official Sanction Agreement (Print View)</span>
+            <span>Sanction Agreement</span>
           </button>
 
           <button
@@ -2438,6 +2846,19 @@ export default function LoansPage() {
           >
             <Calendar className="h-3.5 w-3.5" />
             <span>Repayment Schedule</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setAgreementModalTab('disbursal')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer whitespace-nowrap ${
+              agreementModalTab === 'disbursal'
+                ? 'bg-emerald-600 text-white shadow-sm'
+                : 'text-slate-300 hover:text-white hover:bg-slate-700/60'
+            }`}
+          >
+            <DollarSign className="h-3.5 w-3.5" />
+            <span>Payout Advice</span>
           </button>
         </div>
 
@@ -2503,6 +2924,65 @@ export default function LoansPage() {
               );
             })()}
 
+            {/* 2. Lifecycle Milestone Timeline & Audit Strip */}
+            {renderLifecycleMilestoneStrip(selectedAgreementLoan, 'application')}
+
+            {/* Post-Approval Lock Guarantee Banner */}
+            {(selectedAgreementLoan.status === 'Approved' || selectedAgreementLoan.status === 'Active' || selectedAgreementLoan.status === 'Closed') && (
+              <div className="print:hidden p-3.5 rounded-xl bg-slate-900 text-white border border-slate-700/80 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div className="flex items-center space-x-3">
+                  <div className="p-2 rounded-lg bg-slate-800 text-slate-300 border border-slate-700 shrink-0">
+                    <Lock className="h-5 w-5 text-indigo-400" />
+                  </div>
+                  <div>
+                    <div className="flex items-center space-x-2">
+                      <p className="font-extrabold text-sm text-white">Application Formally Approved &amp; Strictly Locked</p>
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">Non-Editable</span>
+                    </div>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      This loan has passed credit appraisal and sanctioning. All borrower identity, loan terms, bank coordinates, and guarantor details are permanently frozen for audit compliance.
+                    </p>
+                  </div>
+                </div>
+                <div className="shrink-0 flex items-center space-x-2">
+                  <span className="text-[11px] font-mono text-slate-400 bg-slate-800 px-2.5 py-1 rounded border border-slate-700">
+                    Status: {selectedAgreementLoan.status}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Pre-Approval Revision Available Banner */}
+            {(selectedAgreementLoan.status === 'Pending Approval' || selectedAgreementLoan.status === 'Draft' || selectedAgreementLoan.status === 'Pending') && (
+              <div className="print:hidden p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+                <div className="flex items-center space-x-3">
+                  <div className="p-2 rounded-lg bg-amber-100 dark:bg-amber-900/60 text-amber-700 dark:text-amber-300 shrink-0">
+                    <Edit3 className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center space-x-2">
+                      <p className="font-bold text-amber-900 dark:text-amber-200 text-sm">Pre-Approval Revision Mode Available</p>
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-200 dark:bg-amber-800 text-amber-800 dark:text-amber-200">Editable</span>
+                    </div>
+                    <p className="text-amber-700 dark:text-amber-300/80 mt-0.5">
+                      Application is currently pending credit sanction. You can rectify borrower particulars, loan terms, guarantor details, or bank records before final approval.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAgreementModal(false);
+                    handleOpenEditModal(selectedAgreementLoan);
+                  }}
+                  className="inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-bold cursor-pointer transition-colors shadow-xs shrink-0 whitespace-nowrap"
+                >
+                  <Edit3 className="h-3.5 w-3.5" />
+                  <span>Edit Application</span>
+                </button>
+              </div>
+            )}
+
             {/* Application Quick Reference Cards */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 dark:bg-slate-950 print:bg-slate-100 p-3 rounded-xl border border-slate-200 dark:border-slate-800 print:border-slate-300">
               <div>
@@ -2539,6 +3019,30 @@ export default function LoansPage() {
                 }`}>
                   {selectedAgreementLoan.status || 'Active'}
                 </span>
+              </div>
+              <div>
+                <p className="text-[10px] text-slate-500 print:text-slate-600 uppercase font-bold">Lead Date</p>
+                <p className="font-bold text-slate-800 dark:text-slate-200 print:text-black">
+                  {formatDocDate(selectedAgreementLoan.lead_date || selectedAgreementLoan.application_date || selectedAgreementLoan.created_at, 'N/A')}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] text-slate-500 print:text-slate-600 uppercase font-bold">Application Date</p>
+                <p className="font-bold text-slate-800 dark:text-slate-200 print:text-black">
+                  {formatDocDate(selectedAgreementLoan.application_date || selectedAgreementLoan.created_at, 'N/A')}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] text-slate-500 print:text-slate-600 uppercase font-bold">Sanction Date</p>
+                <p className="font-bold text-slate-800 dark:text-slate-200 print:text-black">
+                  {formatDocDate(selectedAgreementLoan.approval_date || (selectedAgreementLoan.status === 'Approved' || selectedAgreementLoan.status === 'Active' ? selectedAgreementLoan.created_at : null), selectedAgreementLoan.status === 'Rejected' ? 'Rejected' : 'Pending')}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] text-slate-500 print:text-slate-600 uppercase font-bold">Disbursal Date</p>
+                <p className="font-bold text-slate-800 dark:text-slate-200 print:text-black">
+                  {formatDocDate(selectedAgreementLoan.disbursement_date, selectedAgreementLoan.status === 'Active' ? 'Disbursed' : 'Pending')}
+                </p>
               </div>
             </div>
 
@@ -2721,10 +3225,6 @@ export default function LoansPage() {
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-                <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-950/50 border border-slate-100 dark:border-slate-800">
-                  <span className="text-slate-400 text-[10px] block uppercase font-medium">Loan Purpose</span>
-                  <span className="font-bold text-slate-800 dark:text-slate-200">{selectedAgreementLoan.loan_purpose_title || 'Animal Husbandry'}</span>
-                </div>
                 <div className="p-2.5 rounded-lg bg-indigo-50/60 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900/40">
                   <span className="text-indigo-600 dark:text-indigo-400 text-[10px] block uppercase font-bold">Principal Sanction</span>
                   <span className="font-black text-indigo-700 dark:text-indigo-300 text-sm">₹{parseFloat(selectedAgreementLoan.loan_amount || 0).toLocaleString()}</span>
@@ -2755,21 +3255,30 @@ export default function LoansPage() {
                 </div>
               </div>
 
-              {/* Disbursal & Approval Meta */}
-              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              {/* Disbursal & Lifecycle Meta */}
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
                 <div>
-                  <span className="text-slate-400 text-[10px] block uppercase font-medium">Approval Particulars</span>
+                  <span className="text-slate-400 text-[10px] block uppercase font-medium">1. Lead Inquiry</span>
                   <span className="font-semibold text-slate-800 dark:text-slate-200">
-                    {selectedAgreementLoan.approval_date ? `Approved on ${new Date(selectedAgreementLoan.approval_date).toLocaleDateString('en-GB')}` : (selectedAgreementLoan.status === 'Pending Approval' ? <span className="text-amber-500 font-bold">Pending Approval</span> : 'Sanctioned')}
-                    {selectedAgreementLoan.approval_notes ? ` • Note: ${selectedAgreementLoan.approval_notes}` : ''}
+                    {formatDocDate(selectedAgreementLoan.lead_date || selectedAgreementLoan.application_date || selectedAgreementLoan.created_at, 'N/A')}
                   </span>
                 </div>
                 <div>
-                  <span className="text-slate-400 text-[10px] block uppercase font-medium">Disbursement Status</span>
+                  <span className="text-slate-400 text-[10px] block uppercase font-medium">2. Application Filing</span>
                   <span className="font-semibold text-slate-800 dark:text-slate-200">
-                    {selectedAgreementLoan.disbursement_date
-                      ? `Disbursed on ${new Date(selectedAgreementLoan.disbursement_date).toLocaleDateString('en-GB')} via ${selectedAgreementLoan.disbursement_mode || 'Bank Transfer'} (UTR: ${selectedAgreementLoan.disbursement_reference || 'DIRECT-CREDIT'})`
-                      : <span className="text-slate-500 italic">Awaiting Fund Disbursal</span>}
+                    {formatDocDate(selectedAgreementLoan.application_date || selectedAgreementLoan.created_at, 'N/A')}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-400 text-[10px] block uppercase font-medium">3. Credit Approval</span>
+                  <span className="font-semibold text-slate-800 dark:text-slate-200">
+                    {formatDocDate(selectedAgreementLoan.approval_date || (selectedAgreementLoan.status === 'Approved' || selectedAgreementLoan.status === 'Active' ? selectedAgreementLoan.created_at : null), selectedAgreementLoan.status === 'Rejected' ? 'Rejected' : 'Pending Approval')}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-400 text-[10px] block uppercase font-medium">4. Fund Disbursal</span>
+                  <span className="font-semibold text-slate-800 dark:text-slate-200">
+                    {formatDocDate(selectedAgreementLoan.disbursement_date, selectedAgreementLoan.status === 'Active' ? 'Disbursed' : 'Awaiting Disbursal')}
                   </span>
                 </div>
               </div>
@@ -2936,6 +3445,238 @@ export default function LoansPage() {
           </div>
         )}
 
+        {/* Tab: Official Loan Sanction Letter */}
+        {agreementModalTab === 'sanction' && (
+          <div className="p-6 sm:p-8 print:p-4 space-y-5 text-xs font-sans text-slate-900 dark:text-white leading-relaxed max-h-[75vh] print:max-h-none overflow-y-auto print:overflow-visible print:text-black">
+            {/* Header Letterhead */}
+            <div className="text-center border-b-2 border-slate-900 dark:border-slate-100 print:border-black pb-3">
+              <h1 className="text-xl font-black uppercase tracking-tight text-slate-900 dark:text-white print:text-black">
+                {settings.institution_name?.toUpperCase() || 'MICROFINANCE INSTITUTION'}
+              </h1>
+              <p className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 print:text-slate-700 mt-0.5">
+                {settings.tagline || 'Registered Non-Banking Financial Company (NBFC - MFI)'}
+              </p>
+              <p className="text-[10px] text-slate-500 dark:text-slate-400 print:text-slate-600 mt-0.5">
+                CIN: {settings.cin_number || 'U65929RJ2024NPL089123'} | Branch Code: {settings.branch_code || 'BR-NNL-001'} | Phone: {settings.phone || '+91 99910 95051'}
+              </p>
+              <div className="mt-2 flex items-center justify-center space-x-2">
+                <span className="inline-block px-4 py-0.5 bg-indigo-900 text-white dark:bg-indigo-600 print:bg-slate-900 print:text-white rounded-full text-[10px] font-black uppercase tracking-widest">
+                  Official Loan Sanction & Credit Approval Letter
+                </span>
+                <span className="text-[10px] font-bold text-slate-500">
+                  Ref: SANC/{selectedAgreementLoan.agreement_no || selectedAgreementLoan.loan_no}
+                </span>
+              </div>
+            </div>
+
+            {/* Lifecycle Milestone Strip */}
+            {renderLifecycleMilestoneStrip(selectedAgreementLoan, 'sanction')}
+
+            {/* Borrower & Sanction Meta Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-xl border border-slate-200 dark:border-slate-800 print:border-slate-300 bg-slate-50 dark:bg-slate-950 print:bg-slate-50">
+              <div className="space-y-1">
+                <p className="text-[10px] font-bold uppercase text-slate-500">Sanction Addressed To:</p>
+                <p className="font-black text-sm uppercase text-slate-900 dark:text-white print:text-black">{selectedAgreementLoan.customer_name}</p>
+                <p className="text-slate-600 dark:text-slate-300 print:text-slate-700">
+                  {selectedAgreementLoan.father_husband_name ? `S/o, W/o ${selectedAgreementLoan.father_husband_name}` : ''}
+                </p>
+                <p className="text-slate-600 dark:text-slate-300 print:text-slate-700 leading-tight">
+                  {[selectedAgreementLoan.address, selectedAgreementLoan.district, selectedAgreementLoan.state, selectedAgreementLoan.pin_code].filter(Boolean).join(', ')}
+                </p>
+                <p className="text-[11px] font-mono font-semibold text-slate-700 dark:text-slate-300 print:text-slate-800">
+                  Mobile: {selectedAgreementLoan.phone} • Aadhaar: {selectedAgreementLoan.aadhaar_number || 'N/A'} • PAN: {selectedAgreementLoan.pan_number || 'N/A'}
+                </p>
+              </div>
+
+              <div className="space-y-1.5 sm:border-l sm:border-slate-200 dark:sm:border-slate-800 print:sm:border-slate-300 sm:pl-3">
+                <p className="text-[10px] font-bold uppercase text-slate-500">Institutional Sanction Reference:</p>
+                <div className="grid grid-cols-2 gap-1 text-[11px]">
+                  <div><span className="text-slate-400">Application No:</span> <strong className="font-mono">{selectedAgreementLoan.loan_no}</strong></div>
+                  <div><span className="text-slate-400">Agreement No:</span> <strong className="font-mono text-indigo-600 print:text-black">{selectedAgreementLoan.agreement_no || selectedAgreementLoan.loan_no}</strong></div>
+                  <div><span className="text-slate-400">Customer ID:</span> <strong className="font-mono text-teal-600 print:text-black">{selectedAgreementLoan.customer_id || 'N/A'}</strong></div>
+                  <div><span className="text-slate-400">Sanction Status:</span> <strong className="text-emerald-600 print:text-black">{selectedAgreementLoan.status === 'Pending Approval' ? 'Under Review' : 'Formally Sanctioned'}</strong></div>
+                </div>
+                <div className="pt-1 border-t border-slate-200 dark:border-slate-800 print:border-slate-300 text-[10px] text-slate-500 dark:text-slate-400">
+                  Sanction valid for 30 calendar days from Approval Date for agreement execution and disbursement.
+                </div>
+              </div>
+            </div>
+
+            {/* Letter Body Opening */}
+            <div className="space-y-1 text-slate-700 dark:text-slate-300 print:text-slate-800">
+              <p className="font-bold">Dear {selectedAgreementLoan.customer_name},</p>
+              <p>
+                With reference to your loan application dated <strong className="text-slate-900 dark:text-white print:text-black">{formatDocDate(selectedAgreementLoan.application_date || selectedAgreementLoan.created_at)}</strong> (Lead Origination Date: <strong className="text-slate-900 dark:text-white print:text-black">{formatDocDate(selectedAgreementLoan.lead_date || selectedAgreementLoan.application_date || selectedAgreementLoan.created_at)}</strong>), we are pleased to inform you that our Credit Committee has formally approved your credit facility on <strong className="text-emerald-700 dark:text-emerald-400 print:text-black">{formatDocDate(selectedAgreementLoan.approval_date || (selectedAgreementLoan.status === 'Approved' || selectedAgreementLoan.status === 'Active' ? selectedAgreementLoan.created_at : null))}</strong> subject to the terms and conditions outlined below:
+              </p>
+            </div>
+
+            {/* Sanction Terms Table */}
+            <div>
+              <h4 className="font-bold text-xs uppercase tracking-wider text-slate-900 dark:text-white print:text-black mb-1.5">
+                Sanctioned Commercial Parameters
+              </h4>
+              <table className="w-full border border-slate-200 dark:border-slate-800 print:border-slate-300 text-left border-collapse text-xs">
+                <tbody className="divide-y divide-slate-200 dark:border-slate-800 print:divide-slate-300">
+                  <tr className="bg-slate-50 dark:bg-slate-950/60 print:bg-slate-100">
+                    <td className="py-2 px-3 font-semibold text-slate-600 dark:text-slate-300 print:text-black">1. Sanctioned Principal Loan Amount</td>
+                    <td className="py-2 px-3 font-black text-slate-900 dark:text-white print:text-black text-right text-sm">₹{parseFloat(selectedAgreementLoan.loan_amount || 0).toLocaleString()}</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 px-3 font-semibold text-slate-600 dark:text-slate-300 print:text-black">2. Applicable Interest Rate (% per annum)</td>
+                    <td className="py-2 px-3 font-bold text-slate-900 dark:text-white print:text-black text-right">{selectedAgreementLoan.interest_rate}% p.a. (Reducing Balance Method)</td>
+                  </tr>
+                  <tr className="bg-slate-50 dark:bg-slate-950/60 print:bg-slate-100">
+                    <td className="py-2 px-3 font-semibold text-slate-600 dark:text-slate-300 print:text-black">3. Repayment Tenure</td>
+                    <td className="py-2 px-3 font-bold text-slate-900 dark:text-white print:text-black text-right">{selectedAgreementLoan.tenure_months} Monthly Installments</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 px-3 font-semibold text-slate-600 dark:text-slate-300 print:text-black">4. Equated Monthly Installment (EMI)</td>
+                    <td className="py-2 px-3 font-black text-indigo-700 dark:text-indigo-400 print:text-black text-right text-sm">₹{parseFloat(selectedAgreementLoan.emi_amount || 0).toLocaleString()} / month</td>
+                  </tr>
+                  <tr className="bg-slate-50 dark:bg-slate-950/60 print:bg-slate-100">
+                    <td className="py-2 px-3 font-semibold text-slate-600 dark:text-slate-300 print:text-black">5. Total Repayable Value (Principal + Interest)</td>
+                    <td className="py-2 px-3 font-bold text-slate-900 dark:text-white print:text-black text-right">₹{parseFloat(selectedAgreementLoan.total_payment || (selectedAgreementLoan.emi_amount * selectedAgreementLoan.tenure_months)).toLocaleString()}</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 px-3 font-semibold text-slate-600 dark:text-slate-300 print:text-black">6. Processing Fees &amp; Documentation GST</td>
+                    <td className="py-2 px-3 font-medium text-slate-800 dark:text-slate-200 print:text-black text-right">₹{Math.ceil(parseFloat(selectedAgreementLoan.loan_amount || 0) * 0.0177).toLocaleString()} (1.5% PF + 18% GST)</td>
+                  </tr>
+                  <tr className="bg-slate-50 dark:bg-slate-950/60 print:bg-slate-100">
+                    <td className="py-2 px-3 font-semibold text-slate-600 dark:text-slate-300 print:text-black">7. Nominated Bank Payout Account</td>
+                    <td className="py-2 px-3 font-mono font-semibold text-slate-900 dark:text-white print:text-black text-right">
+                      {selectedAgreementLoan.bank_name || 'Bank'} • A/C: {selectedAgreementLoan.bank_account_no || 'N/A'} • IFSC: {selectedAgreementLoan.bank_ifsc || 'N/A'}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            {/* Terms and Conditions */}
+            <div className="p-3 bg-slate-50 dark:bg-slate-950 print:bg-slate-50 rounded-xl border border-slate-200 dark:border-slate-800 print:border-slate-300 text-[10.5px] space-y-1 text-slate-600 dark:text-slate-400 print:text-slate-700">
+              <p className="font-bold text-slate-900 dark:text-white print:text-black uppercase text-[11px]">Sanction Covenants &amp; Operational Directives:</p>
+              <p>• <strong>Pre-Disbursal Requirements:</strong> Execution of the formal Sanction Agreement, submission of verified bank details, and compliance with institutional KYC requirements.</p>
+              <p>• <strong>Credit Bureau Reporting:</strong> Performance on this loan will be reported monthly to RBI-approved Credit Information Companies (CIBIL, Equifax, Experian, CRIF High Mark).</p>
+              <p>• <strong>Prepayment Facility:</strong> Permissible at any time without any foreclosure charge or prepayment penalty as mandated by RBI regulations for microfinance loans.</p>
+              <p>• <strong>Penal Charges:</strong> Any delay beyond grace period shall attract penal charges calculated at {settings.annual_penalty_rate || '24.0'}% p.a. strictly on the overdue installment amount without compounding.</p>
+            </div>
+
+            {/* Borrower Acceptance & Signatures */}
+            <div className="pt-4 border-t border-slate-200 dark:border-slate-800 print:border-slate-400 space-y-3">
+              <p className="text-[10px] text-slate-500 italic text-center">
+                I/We have read, understood, and unconditionally accept the loan sanction terms and interest schedule outlined above.
+              </p>
+              <div className="grid grid-cols-2 gap-8 text-center pt-2">
+                <div className="border-t border-dashed border-slate-400 pt-2">
+                  <p className="font-bold uppercase text-slate-900 dark:text-white print:text-black">{selectedAgreementLoan.customer_name}</p>
+                  <p className="text-[10px] text-slate-400 print:text-slate-600">Borrower Signature &amp; Acceptance</p>
+                  <p className="text-[9px] text-slate-400 font-mono mt-0.5">Date: {formatDocDate(selectedAgreementLoan.application_date || selectedAgreementLoan.created_at)}</p>
+                </div>
+                <div className="border-t border-dashed border-slate-400 pt-2">
+                  <p className="font-bold text-slate-900 dark:text-white print:text-black">{settings.signatory_name || 'Credit Sanction Officer'}</p>
+                  <p className="text-[10px] text-slate-400 print:text-slate-600">{settings.signatory_title || 'Branch Manager / Credit Committee'}</p>
+                  <p className="text-[9px] text-slate-400 font-mono mt-0.5">Sanctioned Date: {formatDocDate(selectedAgreementLoan.approval_date || (selectedAgreementLoan.status === 'Approved' || selectedAgreementLoan.status === 'Active' ? selectedAgreementLoan.created_at : null))}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Tab: RBI Key Fact Statement (KFS) */}
+        {agreementModalTab === 'kfs' && (
+          <div className="p-6 sm:p-8 print:p-4 space-y-4 text-xs font-sans text-slate-900 dark:text-white leading-relaxed max-h-[75vh] print:max-h-none overflow-y-auto print:overflow-visible print:text-black">
+            {/* Header Letterhead */}
+            <div className="text-center border-b border-slate-200 dark:border-slate-700 print:border-slate-400 pb-3">
+              <h2 className="text-base font-extrabold text-slate-900 dark:text-white print:text-black uppercase tracking-tight">
+                {settings.institution_name?.toUpperCase() || 'MICROFINANCE INSTITUTION'}
+              </h2>
+              <p className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 print:text-slate-700">
+                {settings.tagline || 'Registered Non-Banking Financial Company (NBFC - MFI)'}
+              </p>
+              <p className="text-[10px] font-bold text-indigo-700 dark:text-indigo-400 print:text-black mt-1 uppercase">
+                Key Fact Statement (KFS) under RBI Master Direction 2026
+              </p>
+            </div>
+
+            {/* Lifecycle Milestone Strip */}
+            {renderLifecycleMilestoneStrip(selectedAgreementLoan, 'kfs')}
+
+            {/* Borrower Details Table */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 dark:bg-slate-950 print:bg-slate-50 p-3 rounded-xl border border-slate-200 dark:border-slate-700 print:border-slate-300">
+              <div>
+                <p className="text-[10px] text-slate-400 print:text-slate-600 font-semibold uppercase">Loan Application No</p>
+                <p className="font-mono font-bold text-indigo-600 dark:text-indigo-400 print:text-black">{selectedAgreementLoan.loan_no}</p>
+              </div>
+              <div>
+                <p className="text-[10px] text-slate-400 print:text-slate-600 font-semibold uppercase">Agreement No</p>
+                <p className="font-mono font-bold text-teal-600 dark:text-teal-400 print:text-black">{selectedAgreementLoan.agreement_no || selectedAgreementLoan.loan_no}</p>
+              </div>
+              <div>
+                <p className="text-[10px] text-slate-400 print:text-slate-600 font-semibold uppercase">Borrower Name</p>
+                <p className="font-bold text-slate-900 dark:text-white print:text-black uppercase">{selectedAgreementLoan.customer_name}</p>
+              </div>
+              <div>
+                <p className="text-[10px] text-slate-400 print:text-slate-600 font-semibold uppercase">Contact Phone</p>
+                <p className="font-semibold text-slate-800 dark:text-slate-100 print:text-black">{selectedAgreementLoan.phone}</p>
+              </div>
+            </div>
+
+            {/* Financial Disclosure Breakdown Table */}
+            <div>
+              <h4 className="font-bold text-slate-900 dark:text-white print:text-black mb-1.5 uppercase text-[11px] tracking-wider">
+                Loan &amp; Financial Cost Disclosure
+              </h4>
+              <table className="w-full border border-slate-200 dark:border-slate-700 print:border-slate-300 text-left border-collapse">
+                <tbody className="divide-y divide-slate-200 dark:divide-slate-700 print:divide-slate-300">
+                  <tr className="bg-slate-50 dark:bg-slate-950 print:bg-slate-100">
+                    <td className="py-1.5 px-3 font-semibold text-slate-700 dark:text-slate-200 print:text-slate-800">1. Sanctioned Principal Amount</td>
+                    <td className="py-1.5 px-3 font-bold text-slate-900 dark:text-white print:text-black text-right">₹{parseFloat(selectedAgreementLoan.loan_amount).toLocaleString()}</td>
+                  </tr>
+                  <tr>
+                    <td className="py-1.5 px-3 font-semibold text-slate-700 dark:text-slate-200 print:text-slate-800">2. Processing Fee (1.5%) + GST (18%)</td>
+                    <td className="py-1.5 px-3 font-medium text-slate-800 dark:text-slate-100 print:text-black text-right">₹{Math.ceil(parseFloat(selectedAgreementLoan.loan_amount) * 0.0177).toLocaleString()}</td>
+                  </tr>
+                  <tr className="bg-emerald-50/60 print:bg-slate-100">
+                    <td className="py-1.5 px-3 font-bold text-emerald-900 print:text-black">3. Net Disbursed Amount</td>
+                    <td className="py-1.5 px-3 font-black text-emerald-700 print:text-black text-right">₹{Math.ceil(parseFloat(selectedAgreementLoan.loan_amount) - Math.ceil(parseFloat(selectedAgreementLoan.loan_amount) * 0.0177)).toLocaleString()}</td>
+                  </tr>
+                  <tr>
+                    <td className="py-1.5 px-3 font-semibold text-slate-700 dark:text-slate-200 print:text-slate-800">4. Annual Interest Rate (Reducing Balance)</td>
+                    <td className="py-1.5 px-3 font-bold text-slate-900 dark:text-white print:text-black text-right">{selectedAgreementLoan.interest_rate}% p.a.</td>
+                  </tr>
+                  <tr>
+                    <td className="py-1.5 px-3 font-semibold text-slate-700 dark:text-slate-200 print:text-slate-800">5. Effective Annual Percentage Rate (APR %)</td>
+                    <td className="py-1.5 px-3 font-bold text-indigo-700 print:text-black text-right">{(parseFloat(selectedAgreementLoan.interest_rate) + 2.1).toFixed(2)}% p.a.</td>
+                  </tr>
+                  <tr className="bg-slate-50 dark:bg-slate-950 print:bg-slate-100">
+                    <td className="py-1.5 px-3 font-semibold text-slate-700 dark:text-slate-200 print:text-slate-800">6. Monthly Installment (EMI)</td>
+                    <td className="py-1.5 px-3 font-black text-slate-900 dark:text-white print:text-black text-right">₹{parseFloat(selectedAgreementLoan.emi_amount).toLocaleString()}</td>
+                  </tr>
+                  <tr>
+                    <td className="py-1.5 px-3 font-semibold text-slate-700 dark:text-slate-200 print:text-slate-800">7. Repayment Tenure</td>
+                    <td className="py-1.5 px-3 font-bold text-slate-900 dark:text-white print:text-black text-right">{selectedAgreementLoan.tenure_months} Months</td>
+                  </tr>
+                  <tr className="bg-slate-900 text-white print:bg-slate-200 print:text-black">
+                    <td className="py-1.5 px-3 font-bold">8. Total Repayment Amount</td>
+                    <td className="py-1.5 px-3 font-black text-right text-emerald-400 print:text-black">₹{parseFloat(selectedAgreementLoan.total_payment || (selectedAgreementLoan.emi_amount * selectedAgreementLoan.tenure_months)).toLocaleString()}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            {/* Signatures */}
+            <div className="pt-4 grid grid-cols-2 gap-8 text-center border-t border-slate-200 dark:border-slate-700 print:border-slate-400">
+              <div className="border-t border-dashed border-slate-400 pt-2">
+                <p className="font-bold text-slate-900 dark:text-white print:text-black">{selectedAgreementLoan.customer_name}</p>
+                <p className="text-[10px] text-slate-400 print:text-slate-600">Borrower Signature (I accept all KFS loan terms)</p>
+              </div>
+              <div className="border-t border-dashed border-slate-400 pt-2">
+                <p className="font-bold text-slate-900 dark:text-white print:text-black">{settings.signatory_name || 'Authorized NBFC Officer'}</p>
+                <p className="text-[10px] text-slate-400 print:text-slate-600">{settings.signatory_title ? `${settings.signatory_title} - ${settings.institution_name || 'Institution'}` : (settings.institution_name || 'Authorized Signatory')}</p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Tab 2: Official Loan Agreement Contract (Print View) */}
         {agreementModalTab === 'agreement' && (
           <div className="p-6 sm:p-8 print:p-4 space-y-5 text-xs font-sans text-slate-900 dark:text-white leading-relaxed max-h-[75vh] print:max-h-none overflow-y-auto print:overflow-visible print:text-black">
@@ -2945,7 +3686,7 @@ export default function LoansPage() {
               {/* Header */}
               <div className="text-center border-b-2 border-slate-900 dark:border-slate-100 print:border-black pb-3">
                 <h1 className="text-xl font-black uppercase tracking-tight text-slate-900 dark:text-white print:text-black">
-                  {settings.institution_name?.toUpperCase() || 'KASPR GROUP OF MICROFINANCE'}
+                  {settings.institution_name?.toUpperCase() || 'MICROFINANCE INSTITUTION'}
                 </h1>
                 <p className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 print:text-slate-700 mt-0.5">
                   {settings.tagline || 'Registered Non-Banking Financial Company (NBFC - MFI)'}
@@ -2980,10 +3721,13 @@ export default function LoansPage() {
                 <div>
                   <p className="text-[10px] text-slate-500 print:text-slate-600 uppercase font-bold">Sanction Date</p>
                   <p className="font-bold text-slate-800 dark:text-slate-200 print:text-black">
-                    {selectedAgreementLoan.created_at ? new Date(selectedAgreementLoan.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : new Date().toLocaleDateString('en-GB')}
+                    {formatDocDate(selectedAgreementLoan.approval_date || (selectedAgreementLoan.status === 'Approved' || selectedAgreementLoan.status === 'Active' ? selectedAgreementLoan.created_at : null))}
                   </p>
                 </div>
               </div>
+
+              {/* Milestone Timeline Strip */}
+              {renderLifecycleMilestoneStrip(selectedAgreementLoan, 'agreement')}
 
               {/* 1. Borrower Particulars */}
               <div>
@@ -3083,12 +3827,6 @@ export default function LoansPage() {
                       </td>
                     </tr>
                     <tr>
-                      <td className="py-1.5 px-3 print:py-1 print:px-2 font-semibold text-slate-600 dark:text-slate-300 print:text-slate-700">Loan Purpose & Category</td>
-                      <td className="py-1.5 px-3 print:py-1 print:px-2 font-bold text-right text-slate-800 dark:text-slate-200 print:text-black">
-                        {selectedAgreementLoan.loan_purpose_title || 'Animal Husbandry / Micro Enterprise'}
-                      </td>
-                    </tr>
-                    <tr className="bg-slate-50 dark:bg-slate-950 print:bg-slate-100">
                       <td className="py-1.5 px-3 print:py-1 print:px-2 font-semibold text-slate-600 dark:text-slate-300 print:text-slate-700">Annual Reducing Interest Rate</td>
                       <td className="py-1.5 px-3 print:py-1 print:px-2 font-bold text-right text-slate-800 dark:text-slate-200 print:text-black">
                         {selectedAgreementLoan.interest_rate}% per annum
@@ -3153,7 +3891,7 @@ export default function LoansPage() {
               {/* Page 2 Top Running Header (Print Only) */}
               <div className="hidden print:block border-b border-slate-300 pb-2 mb-2">
                 <div className="flex justify-between items-center text-[10px] text-slate-500">
-                  <span className="font-bold uppercase tracking-wider">{settings.institution_name?.toUpperCase() || 'KASPR GROUP OF MICROFINANCE'} — REPAYMENT SCHEDULE & LEGAL TERMS</span>
+                  <span className="font-bold uppercase tracking-wider">{settings.institution_name?.toUpperCase() || 'MICROFINANCE INSTITUTION'} — REPAYMENT SCHEDULE & LEGAL TERMS</span>
                   <span>Agreement: <strong className="text-black font-mono">{selectedAgreementLoan.agreement_no || selectedAgreementLoan.loan_no}</strong> | Page 2 of 2</span>
                 </div>
               </div>
@@ -3246,7 +3984,7 @@ export default function LoansPage() {
                     {settings.signatory_name || 'Authorized Officer'}
                   </p>
                   <p className="text-[10px] text-slate-400 print:text-slate-600">
-                    {settings.signatory_title || 'Managing Director'}
+                    {settings.signatory_title || 'Authorized Signatory'}
                   </p>
                 </div>
               </div>
@@ -3297,6 +4035,9 @@ export default function LoansPage() {
               </div>
             </div>
 
+            {/* Lifecycle Milestone Strip */}
+            {renderLifecycleMilestoneStrip(selectedAgreementLoan, 'schedule')}
+
             <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
@@ -3331,32 +4072,208 @@ export default function LoansPage() {
           </div>
         )}
 
+        {/* Tab: Disbursement Advice & Payout Voucher */}
+        {agreementModalTab === 'disbursal' && (
+          <div className="p-6 sm:p-8 print:p-4 space-y-5 text-xs font-sans text-slate-900 dark:text-white leading-relaxed max-h-[75vh] print:max-h-none overflow-y-auto print:overflow-visible print:text-black">
+            {/* Header Letterhead */}
+            <div className="text-center border-b-2 border-slate-900 dark:border-slate-100 print:border-black pb-3">
+              <h1 className="text-xl font-black uppercase tracking-tight text-slate-900 dark:text-white print:text-black">
+                {settings.institution_name?.toUpperCase() || 'MICROFINANCE INSTITUTION'}
+              </h1>
+              <p className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 print:text-slate-700 mt-0.5">
+                {settings.tagline || 'Registered Non-Banking Financial Company (NBFC - MFI)'}
+              </p>
+              <p className="text-[10px] text-slate-500 dark:text-slate-400 print:text-slate-600 mt-0.5">
+                CIN: {settings.cin_number || 'U65929RJ2024NPL089123'} | Branch Code: {settings.branch_code || 'BR-NNL-001'} | Phone: {settings.phone || '+91 99910 95051'}
+              </p>
+              <div className="mt-2 flex items-center justify-center space-x-2">
+                <span className="inline-block px-4 py-0.5 bg-emerald-800 text-white dark:bg-emerald-600 print:bg-slate-900 print:text-white rounded-full text-[10px] font-black uppercase tracking-widest">
+                  Official Disbursement Advice & Payout Voucher
+                </span>
+                <span className="text-[10px] font-bold text-slate-500">
+                  Voucher No: DISB/{selectedAgreementLoan.agreement_no || selectedAgreementLoan.loan_no}
+                </span>
+              </div>
+            </div>
+
+            {/* Lifecycle Milestone Strip */}
+            {renderLifecycleMilestoneStrip(selectedAgreementLoan, 'disbursal')}
+
+            {/* Payout Summary Cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-emerald-50/70 dark:bg-emerald-950/40 print:bg-slate-50 p-3 rounded-xl border border-emerald-200 dark:border-emerald-800 print:border-slate-300">
+              <div>
+                <p className="text-[10px] text-emerald-800 dark:text-emerald-300 print:text-slate-600 uppercase font-bold">Gross Sanction</p>
+                <p className="font-black text-slate-900 dark:text-white print:text-black text-sm">₹{parseFloat(selectedAgreementLoan.loan_amount || 0).toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-[10px] text-emerald-800 dark:text-emerald-300 print:text-slate-600 uppercase font-bold">Processing Fee + GST</p>
+                <p className="font-bold text-rose-600 dark:text-rose-400 print:text-black text-sm">₹{Math.ceil(parseFloat(selectedAgreementLoan.loan_amount || 0) * 0.0177).toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-[10px] text-emerald-800 dark:text-emerald-300 print:text-slate-600 uppercase font-bold">Net Transferred</p>
+                <p className="font-black text-emerald-700 dark:text-emerald-400 print:text-black text-base">₹{(Math.ceil(parseFloat(selectedAgreementLoan.loan_amount || 0) - Math.ceil(parseFloat(selectedAgreementLoan.loan_amount || 0) * 0.0177))).toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-[10px] text-emerald-800 dark:text-emerald-300 print:text-slate-600 uppercase font-bold">Disbursal Value Date</p>
+                <p className="font-mono font-bold text-slate-900 dark:text-white print:text-black">
+                  {formatDocDate(selectedAgreementLoan.disbursement_date, 'Pending Disbursal')}
+                </p>
+              </div>
+            </div>
+
+            {/* Beneficiary & Banking Details Table */}
+            <div>
+              <h4 className="font-bold text-xs uppercase tracking-wider text-slate-900 dark:text-white print:text-black mb-1.5">
+                Beneficiary Bank & Remittance Particulars
+              </h4>
+              <table className="w-full border border-slate-200 dark:border-slate-800 print:border-slate-300 text-left border-collapse text-xs">
+                <tbody className="divide-y divide-slate-200 dark:divide-slate-800 print:divide-slate-300">
+                  <tr className="bg-slate-50 dark:bg-slate-950/60 print:bg-slate-100">
+                    <td className="py-2 px-3 font-semibold text-slate-600 dark:text-slate-300 print:text-black">Beneficiary Borrower Name</td>
+                    <td className="py-2 px-3 font-bold uppercase text-slate-900 dark:text-white print:text-black">{selectedAgreementLoan.account_holder_name || selectedAgreementLoan.customer_name}</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 px-3 font-semibold text-slate-600 dark:text-slate-300 print:text-black">Remittance Payment Mode</td>
+                    <td className="py-2 px-3 font-semibold text-slate-900 dark:text-white print:text-black">{selectedAgreementLoan.disbursement_mode || selectedAgreementLoan.payment_mode || 'Bank Transfer (NEFT/RTGS/IMPS)'}</td>
+                  </tr>
+                  <tr className="bg-slate-50 dark:bg-slate-950/60 print:bg-slate-100">
+                    <td className="py-2 px-3 font-semibold text-slate-600 dark:text-slate-300 print:text-black">Bank Reference / UTR Number</td>
+                    <td className="py-2 px-3 font-mono font-bold text-indigo-600 dark:text-indigo-400 print:text-black">{selectedAgreementLoan.disbursement_reference || selectedAgreementLoan.reference_no || 'UTR-DIRECT-CREDIT-ACK'}</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 px-3 font-semibold text-slate-600 dark:text-slate-300 print:text-black">Bank Name &amp; Branch</td>
+                    <td className="py-2 px-3 font-bold text-slate-900 dark:text-white print:text-black">{selectedAgreementLoan.bank_name || 'N/A'}</td>
+                  </tr>
+                  <tr className="bg-slate-50 dark:bg-slate-950/60 print:bg-slate-100">
+                    <td className="py-2 px-3 font-semibold text-slate-600 dark:text-slate-300 print:text-black">Bank Account Number</td>
+                    <td className="py-2 px-3 font-mono font-bold text-slate-900 dark:text-white print:text-black">{selectedAgreementLoan.bank_account_no || 'N/A'}</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 px-3 font-semibold text-slate-600 dark:text-slate-300 print:text-black">IFSC Code</td>
+                    <td className="py-2 px-3 font-mono font-bold text-slate-900 dark:text-white print:text-black">{selectedAgreementLoan.bank_ifsc || 'N/A'}</td>
+                  </tr>
+                  <tr className="bg-slate-50 dark:bg-slate-950/60 print:bg-slate-100">
+                    <td className="py-2 px-3 font-semibold text-slate-600 dark:text-slate-300 print:text-black">First Installment Due Date</td>
+                    <td className="py-2 px-3 font-bold text-emerald-700 dark:text-emerald-400 print:text-black">{formatDocDate(selectedAgreementLoan.next_due_date, 'As Per Schedule')}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            {/* Certification and Signatures */}
+            <div className="p-3 bg-slate-50 dark:bg-slate-950 print:bg-slate-50 rounded-xl border border-slate-200 dark:border-slate-800 print:border-slate-300 text-[10.5px] space-y-1 text-slate-600 dark:text-slate-400 print:text-slate-700">
+              <p className="font-bold text-slate-900 dark:text-white print:text-black uppercase">Institutional Payout Certification:</p>
+              <p>We certify that the funds described above have been authorized, cleared, and released from the institutional disbursement account to the designated borrower account in compliance with RBI lending covenants.</p>
+            </div>
+
+            <div className="pt-4 border-t border-slate-200 dark:border-slate-800 print:border-slate-400 grid grid-cols-3 gap-6 text-center">
+              <div className="border-t border-dashed border-slate-400 pt-2">
+                <p className="font-bold uppercase text-slate-900 dark:text-white print:text-black">{selectedAgreementLoan.customer_name}</p>
+                <p className="text-[10px] text-slate-400 print:text-slate-600">Borrower Acknowledgment</p>
+              </div>
+              <div className="border-t border-dashed border-slate-400 pt-2">
+                <p className="font-bold text-slate-900 dark:text-white print:text-black">Cashier / Ops Head</p>
+                <p className="text-[10px] text-slate-400 print:text-slate-600">Disbursing Officer</p>
+              </div>
+              <div className="border-t border-dashed border-slate-400 pt-2">
+                <p className="font-bold text-slate-900 dark:text-white print:text-black">{settings.signatory_name || 'Branch Manager'}</p>
+                <p className="text-[10px] text-slate-400 print:text-slate-600">{settings.signatory_title || 'Authorized Signatory'}</p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Footer Actions (Hidden on Print) */}
         <div className="print:hidden bg-slate-100 dark:bg-slate-800 px-5 sm:px-6 py-3 border-t border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center space-x-3 text-xs">
+          <div className="flex items-center space-x-2 text-xs flex-wrap">
+            <span className="text-[11px] text-slate-400 font-semibold mr-1">Switch View:</span>
             {agreementModalTab !== 'application' && (
               <button
                 type="button"
                 onClick={() => setAgreementModalTab('application')}
                 className="font-bold text-teal-600 dark:text-teal-400 hover:underline flex items-center space-x-1 cursor-pointer"
               >
-                <FileText className="h-3.5 w-3.5" />
-                <span>View Full Application Dossier</span>
+                <FileText className="h-3 w-3" />
+                <span>Application</span>
+              </button>
+            )}
+            {agreementModalTab !== 'sanction' && (
+              <button
+                type="button"
+                onClick={() => setAgreementModalTab('sanction')}
+                className="font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center space-x-1 cursor-pointer"
+              >
+                <FileCheck className="h-3 w-3" />
+                <span>Sanction Letter</span>
+              </button>
+            )}
+            {agreementModalTab !== 'kfs' && (
+              <button
+                type="button"
+                onClick={() => setAgreementModalTab('kfs')}
+                className="font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center space-x-1 cursor-pointer"
+              >
+                <Shield className="h-3 w-3" />
+                <span>KFS</span>
               </button>
             )}
             {agreementModalTab !== 'agreement' && (
               <button
                 type="button"
                 onClick={() => setAgreementModalTab('agreement')}
-                className="font-bold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center space-x-1 cursor-pointer"
+                className="font-bold text-teal-600 dark:text-teal-400 hover:underline flex items-center space-x-1 cursor-pointer"
               >
-                <FileCheck className="h-3.5 w-3.5" />
-                <span>View Sanction Agreement</span>
+                <FileCheck className="h-3 w-3" />
+                <span>Agreement</span>
+              </button>
+            )}
+            {agreementModalTab !== 'schedule' && (
+              <button
+                type="button"
+                onClick={() => setAgreementModalTab('schedule')}
+                className="font-bold text-teal-600 dark:text-teal-400 hover:underline flex items-center space-x-1 cursor-pointer"
+              >
+                <Calendar className="h-3 w-3" />
+                <span>Schedule</span>
+              </button>
+            )}
+            {agreementModalTab !== 'disbursal' && (
+              <button
+                type="button"
+                onClick={() => setAgreementModalTab('disbursal')}
+                className="font-bold text-emerald-600 dark:text-emerald-400 hover:underline flex items-center space-x-1 cursor-pointer"
+              >
+                <DollarSign className="h-3 w-3" />
+                <span>Payout Advice</span>
               </button>
             )}
           </div>
 
           <div className="flex items-center space-x-2 flex-wrap">
+            {/* Pre-approval edit trigger */}
+            {(selectedAgreementLoan.status === 'Pending Approval' || selectedAgreementLoan.status === 'Draft' || selectedAgreementLoan.status === 'Pending') && (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAgreementModal(false);
+                  handleOpenEditModal(selectedAgreementLoan);
+                }}
+                className="inline-flex items-center space-x-1 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-900 text-xs font-bold transition-all shadow-xs cursor-pointer"
+                title="Edit and correct loan application before sanctioning"
+              >
+                <Edit3 className="h-3.5 w-3.5" />
+                <span>Edit Application</span>
+              </button>
+            )}
+
+            {/* Post-approval locked badge */}
+            {(selectedAgreementLoan.status === 'Approved' || selectedAgreementLoan.status === 'Active' || selectedAgreementLoan.status === 'Closed') && (
+              <span className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-slate-800 text-slate-400 text-xs font-semibold border border-slate-700">
+                <Lock className="h-3.5 w-3.5 text-slate-500" />
+                <span>Locked Post-Approval</span>
+              </span>
+            )}
+
             {/* Quick Action buttons if in Pending Approval */}
             {selectedAgreementLoan.status === 'Pending Approval' && (isAdmin || isManager) && (
               <>
@@ -3364,6 +4281,7 @@ export default function LoansPage() {
                   type="button"
                   onClick={() => {
                     setSelectedApproveLoan(selectedAgreementLoan);
+                    setApprovalDate(new Date().toISOString().split('T')[0]);
                     setApprovalNotes(isManager ? 'Verified and sanctioned by Branch Manager' : 'Verified and sanctioned by Administrator');
                     setShowApproveModal(true);
                   }}
@@ -3421,7 +4339,12 @@ export default function LoansPage() {
             >
               <Printer className="h-3.5 w-3.5" />
               <span>
-                {agreementModalTab === 'application' ? 'Print Application' : agreementModalTab === 'agreement' ? 'Print Agreement' : 'Print Schedule'}
+                {agreementModalTab === 'application' ? 'Print Application' : 
+                 agreementModalTab === 'sanction' ? 'Print Sanction Letter' :
+                 agreementModalTab === 'kfs' ? 'Print KFS' :
+                 agreementModalTab === 'agreement' ? 'Print Agreement' : 
+                 agreementModalTab === 'schedule' ? 'Print Schedule' :
+                 'Print Payout Advice'}
               </span>
             </button>
           </div>
@@ -3438,18 +4361,36 @@ export default function LoansPage() {
  {/* Modal Header */}
  <div className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
  <div>
- <h3 className="font-bold text-lg">New Loan Application Wizard</h3>
+ <h3 className="font-bold text-lg">
+   {editingLoanId ? `Edit Loan Application — ${formData.agreement_no || formData.loan_no || `#${editingLoanId}`}` : 'New Loan Application Wizard'}
+ </h3>
  <div className="flex items-center space-x-2 mt-0.5">
  <p className="text-xs text-indigo-400">Step {currentStep} of 6: {steps[currentStep - 1].label}</p>
- <span className="text-[10px] font-extrabold bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded border border-emerald-400/30">Max ₹2,00,000 Limit</span>
+ {editingLoanId ? (
+   <span className="text-[10px] font-extrabold bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-400/30 flex items-center space-x-1">
+     <Edit3 className="h-2.5 w-2.5" />
+     <span>Pre-Approval Revision</span>
+   </span>
+ ) : (
+   <span className="text-[10px] font-extrabold bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded border border-emerald-400/30">Max ₹2,00,000 Limit</span>
+ )}
  </div>
  </div>
  <div className="flex items-center space-x-2">
- <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-white cursor-pointer p-1 rounded-lg hover:bg-slate-800 transition-colors">
+ <button onClick={() => { setShowModal(false); setEditingLoanId(null); }} className="text-slate-400 hover:text-white cursor-pointer p-1 rounded-lg hover:bg-slate-800 transition-colors">
  <X className="h-5 w-5" />
  </button>
  </div>
  </div>
+
+ {editingLoanId && (
+   <div className="bg-amber-500/10 border-b border-amber-500/20 px-6 py-2.5 flex items-center justify-between text-xs text-amber-200">
+     <div className="flex items-center space-x-2">
+       <Edit3 className="h-4 w-4 text-amber-400 shrink-0" />
+       <span><strong>Pre-Approval Revision Mode:</strong> Modifying details for application <span className="font-mono font-bold text-amber-300">{formData.agreement_no || formData.loan_no}</span>. Note: Applications are permanently locked and non-editable once approved.</span>
+     </div>
+   </div>
+ )}
 
  {/* Stepper Progress Bar */}
  <div className="bg-slate-800 border-b border-slate-700 px-6 py-3 overflow-x-auto">
@@ -4101,6 +5042,51 @@ export default function LoansPage() {
     </span>
   </div>
 
+  {/* Loan Lifecycle Milestone Dates */}
+  <div className="p-3.5 bg-blue-50/70 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900/50 rounded-xl space-y-2.5">
+    <div className="flex items-center justify-between">
+      <div className="flex items-center space-x-2">
+        <Calendar className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+        <span className="text-xs font-bold uppercase tracking-wider text-blue-900 dark:text-blue-200">Lifecycle Milestone Dates</span>
+      </div>
+      <span className="text-[10px] font-semibold text-blue-600 dark:text-blue-400 bg-white dark:bg-blue-900/40 px-2 py-0.5 rounded border border-blue-200 dark:border-blue-800">
+        Regulatory & Audit Milestones
+      </span>
+    </div>
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <div>
+        <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">
+          Lead Origination / Inquiry Date <span className="text-rose-500">*</span>
+        </label>
+        <input
+          type="date"
+          required
+          value={formData.lead_date || ''}
+          onChange={(e) => setFormData({ ...formData, lead_date: e.target.value })}
+          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-xs font-semibold text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+        <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">Date when customer inquiry / lead was registered.</p>
+      </div>
+      <div>
+        <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">
+          Application Submission Date <span className="text-rose-500">*</span>
+        </label>
+        <input
+          type="date"
+          required
+          value={formData.application_date || ''}
+          onChange={(e) => setFormData({ ...formData, application_date: e.target.value })}
+          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-xs font-semibold text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+        <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">Formal loan application filing date.</p>
+      </div>
+    </div>
+    <div className="grid grid-cols-2 gap-2 pt-1.5 border-t border-blue-200/60 dark:border-blue-900/40 text-[10px] text-slate-500 dark:text-slate-400">
+      <div>• <strong>Sanction / Approval Date:</strong> Set automatically upon credit review</div>
+      <div>• <strong>Disbursal Date:</strong> Set automatically upon release of funds</div>
+    </div>
+  </div>
+
   <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
   <div>
   <div className="flex justify-between items-center mb-1">
@@ -4513,7 +5499,7 @@ export default function LoansPage() {
 
   <div className="p-4 rounded-xl bg-slate-900 text-white space-y-3 mt-4">
  <p className="text-xs text-slate-300 leading-relaxed">
- As per {settings.institution_name || 'Kaspr Group of Microfinance'} rules, I confirm that the information provided above is correct and true. I understand that false information may lead to cancellation of the application.
+ As per {settings.institution_name || 'the institution'} rules, I confirm that the information provided above is correct and true. I understand that false information may lead to cancellation of the application.
  </p>
  <div className="flex items-center space-x-2">
  <input
@@ -4558,29 +5544,31 @@ export default function LoansPage() {
   ) : <div></div>}
 
   <div className="flex items-center space-x-2.5">
-    {/* Save Draft Button on Every Step */}
-    <button
-      type="button"
-      onClick={handleSaveDraft}
-      className={`inline-flex items-center space-x-2 px-4 py-2.5 rounded-xl border text-sm font-bold transition-all cursor-pointer ${
-        isDraftSaved
-          ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/60 ring-2 ring-emerald-500/30'
-          : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 hover:border-slate-300'
-      }`}
-      title="Save your progress on this step to resume anytime"
-    >
-      {isDraftSaved ? (
-        <>
-          <Check className="h-4 w-4 text-emerald-400 animate-in zoom-in duration-150" />
-          <span>Saved!</span>
-        </>
-      ) : (
-        <>
-          <Save className="h-4 w-4 text-indigo-500 dark:text-indigo-400" />
-          <span>Save Draft</span>
-        </>
-      )}
-    </button>
+    {/* Save Draft Button on Every Step (Only for new applications) */}
+    {!editingLoanId && (
+      <button
+        type="button"
+        onClick={handleSaveDraft}
+        className={`inline-flex items-center space-x-2 px-4 py-2.5 rounded-xl border text-sm font-bold transition-all cursor-pointer ${
+          isDraftSaved
+            ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/60 ring-2 ring-emerald-500/30'
+            : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 hover:border-slate-300'
+        }`}
+        title="Save your progress on this step to resume anytime"
+      >
+        {isDraftSaved ? (
+          <>
+            <Check className="h-4 w-4 text-emerald-400 animate-in zoom-in duration-150" />
+            <span>Saved!</span>
+          </>
+        ) : (
+          <>
+            <Save className="h-4 w-4 text-indigo-500 dark:text-indigo-400" />
+            <span>Save Draft</span>
+          </>
+        )}
+      </button>
+    )}
 
     {currentStep < 6 ? (
     <button
@@ -4595,10 +5583,14 @@ export default function LoansPage() {
     <button
     type="submit"
     disabled={submitting}
-    className="inline-flex items-center space-x-2 px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold shadow-lg shadow-emerald-600/20 cursor-pointer transition-all"
+    className={`inline-flex items-center space-x-2 px-6 py-2.5 rounded-xl text-white text-sm font-bold shadow-lg cursor-pointer transition-all ${
+      editingLoanId
+        ? 'bg-amber-600 hover:bg-amber-500 shadow-amber-600/20'
+        : 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-600/20'
+    }`}
     >
     {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-    <span>Submit Application</span>
+    <span>{editingLoanId ? 'Save & Update Application' : 'Submit Application'}</span>
     </button>
     )}
   </div>
@@ -4788,19 +5780,18 @@ export default function LoansPage() {
                             <th className="py-2 px-2.5">Aadhaar</th>
                             <th className="py-2 px-2.5">Amount</th>
                             <th className="py-2 px-2.5">Tenure</th>
-                            <th className="py-2 px-2.5">Purpose</th>
                             <th className="py-2 px-2.5">Status</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                           {csvPreviewRows.map((r, idx) => {
-                            const name = r.customer_name || r.name || r.borrower_name || 'N/A';
-                            const phone = r.phone || r.mobile || r.contact || 'N/A';
-                            const aadhaar = r.aadhaar_number || r.aadhaar || 'N/A';
-                            const amt = parseFloat(r.loan_amount || r.amount || r.principal || 0);
-                            const tenure = (r.tenure_months || r.tenure || '24') + ' Mos';
-                            const purpose = r.loan_purpose_title || r.loan_purpose || r.purpose || 'Micro Loan';
-                            const status = r.status || 'Active';
+                            const name = r.customer_name || r.name || r['Borrower Full Name'] || r['Borrower Name'] || r.borrower_name || r['Borrower'] || 'N/A';
+                            const phone = r.phone || r.mobile || r['Primary Mobile'] || r['Mobile'] || r['Mobile Number'] || r.contact || 'N/A';
+                            const aadhaar = r.aadhaar_number || r.aadhaar || r['Aadhaar Number'] || r['Aadhaar'] || 'N/A';
+                            const rawAmt = r.loan_amount || r['Sanctioned Principal'] || r['Loan Amount'] || r['Amount'] || r.principal || r.amount || 0;
+                            const amt = parseFloat(String(rawAmt).replace(/[^0-9.]/g, '')) || 0;
+                            const tenure = (r.tenure_months || r['Tenure (Months)'] || r.tenure || '24') + ' Mos';
+                            const status = r.status || r['Status'] || 'Active';
 
                             return (
                               <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
@@ -4810,7 +5801,6 @@ export default function LoansPage() {
                                 <td className="py-1.5 px-2.5 font-mono text-[10px] text-slate-500">{aadhaar}</td>
                                 <td className="py-1.5 px-2.5 font-bold text-emerald-600">₹{amt.toLocaleString()}</td>
                                 <td className="py-1.5 px-2.5 text-slate-600 dark:text-slate-300">{tenure}</td>
-                                <td className="py-1.5 px-2.5 text-slate-600 dark:text-slate-300">{purpose}</td>
                                 <td className="py-1.5 px-2.5">
                                   <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
                                     {status}

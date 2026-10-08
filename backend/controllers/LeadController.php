@@ -37,7 +37,7 @@ class LeadController {
         $id = (int)($input['id'] ?? 0);
         $status = $input['status'] ?? '';
 
-        if ($id <= 0 || !in_array($status, ['Approved', 'Rejected', 'Pending'])) {
+        if ($id <= 0 || !in_array($status, ['Approved', 'Confirmed', 'Rejected', 'Pending', 'Draft', 'Completed'])) {
             Response::error('Invalid ID or status value', 400);
         }
 
@@ -67,7 +67,6 @@ class LeadController {
             'Email Address',
             'City / Location',
             'Requested Amount',
-            'Loan Category',
             'Status',
             'Created At'
         ]);
@@ -80,7 +79,6 @@ class LeadController {
                 $l['email'] ?? '',
                 $l['city'] ?? '',
                 (float)($l['amount'] ?? 0),
-                $l['loan_type'] ?? 'Microfinance Loan',
                 $l['status'] ?? 'Pending',
                 $l['created_at'] ?? ''
             ]);
@@ -162,7 +160,6 @@ class LeadController {
             'email',
             'city',
             'amount',
-            'loan_type',
             'status'
         ]);
 
@@ -173,7 +170,6 @@ class LeadController {
             'sita.devi@example.com',
             'NARNAUL',
             '50000',
-            'Women Empowerment',
             'Pending'
         ]);
 
@@ -184,7 +180,6 @@ class LeadController {
             'rajesh.kumar@example.com',
             'MAHENDERGARH',
             '100000',
-            'Small Business',
             'Pending'
         ]);
 
