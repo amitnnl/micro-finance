@@ -47,22 +47,29 @@ export default function SettingsPage() {
     signatory_title: 'Authorized Officer'
   });
 
-  // Sync state when globalSettings loads or updates
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
+
+  // Sync state initially from globalSettings ONCE
   useEffect(() => {
-    if (globalSettings && Object.keys(globalSettings).length > 0) {
+    if (!isLoaded && globalSettings && Object.keys(globalSettings).length > 0) {
       setSettings((prev) => ({ ...prev, ...globalSettings }));
+      setIsLoaded(true);
     }
-  }, [globalSettings]);
+  }, [globalSettings, isLoaded]);
 
   const fetchSettings = async () => {
     setLoading(true);
     try {
       const res = await api.get('settings');
       if (res.success && res.data && res.data.settings) {
-        setSettings((prev) => ({ ...prev, ...res.data.settings }));
+        if (!isDirty) {
+          setSettings((prev) => ({ ...prev, ...res.data.settings }));
+        }
         if (updateLocalSettings) {
           updateLocalSettings(res.data.settings);
         }
+        setIsLoaded(true);
       }
     } catch (err) {
       console.error('Error fetching settings:', err);
@@ -76,10 +83,12 @@ export default function SettingsPage() {
   }, []);
 
   const handleChange = (key, value) => {
+    setIsDirty(true);
     setSettings((prev) => ({ ...prev, [key]: value }));
   };
 
   const handleAnnualPenaltyChange = (val) => {
+    setIsDirty(true);
     const num = parseFloat(val);
     const daily = !isNaN(num) && num >= 0 ? (num / 365).toFixed(4) : '';
     setSettings((prev) => ({
@@ -90,6 +99,7 @@ export default function SettingsPage() {
   };
 
   const handleDailyPenaltyChange = (val) => {
+    setIsDirty(true);
     const num = parseFloat(val);
     const annual = !isNaN(num) && num >= 0 ? (num * 365).toFixed(2) : '';
     setSettings((prev) => ({
@@ -104,19 +114,14 @@ export default function SettingsPage() {
     setSaving(true);
     setSavedSuccess(false);
     try {
-      // Optimistically update context & localStorage immediately
-      if (updateLocalSettings) {
-        updateLocalSettings(settings);
-      }
       const res = await api.post('settings', settings);
       if (res.success) {
+        const savedData = res.data?.settings || settings;
         setSavedSuccess(true);
-        if (res.data?.settings && updateLocalSettings) {
-          updateLocalSettings(res.data.settings);
-          setSettings((prev) => ({ ...prev, ...res.data.settings }));
-        }
-        if (refreshSettings) {
-          await refreshSettings();
+        setSettings(savedData);
+        setIsDirty(false);
+        if (updateLocalSettings) {
+          updateLocalSettings(savedData);
         }
         setTimeout(() => setSavedSuccess(false), 3000);
       } else {

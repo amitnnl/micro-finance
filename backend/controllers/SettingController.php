@@ -40,9 +40,13 @@ class SettingController {
         }
 
         try {
-            // Fast sub-millisecond check: if settings table already exists, skip DDL entirely
             $check = $this->db->query("SELECT 1 FROM `settings` LIMIT 1");
             if ($check !== false) {
+                // Table exists, ensure no duplicate rows and unique index
+                try {
+                    $this->db->exec("DELETE s1 FROM `settings` s1 INNER JOIN `settings` s2 WHERE s1.id < s2.id AND s1.setting_key = s2.setting_key");
+                    $this->db->exec("ALTER TABLE `settings` ADD UNIQUE KEY `idx_uniq_setting_key` (`setting_key`)");
+                } catch (Exception $e) {}
                 self::$tableChecked = true;
                 return;
             }
@@ -76,7 +80,7 @@ class SettingController {
 
     public function getSettings() {
         try {
-            $stmt = $this->db->query("SELECT setting_key, setting_value FROM `settings`");
+            $stmt = $this->db->query("SELECT setting_key, setting_value FROM `settings` ORDER BY id ASC");
             $rows = $stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : [];
 
             $settings = [];
@@ -144,15 +148,23 @@ class SettingController {
 
             // Update MySQL database directly in an atomic transaction
             $this->db->beginTransaction();
-            $stmt = $this->db->prepare("INSERT INTO `settings` (`setting_key`, `setting_value`) VALUES (:key, :val) ON DUPLICATE KEY UPDATE `setting_value` = VALUES(`setting_value`)");
+            $upStmt = $this->db->prepare("UPDATE `settings` SET `setting_value` = :val WHERE `setting_key` = :key");
+            $chkStmt = $this->db->prepare("SELECT id FROM `settings` WHERE `setting_key` = :key LIMIT 1");
+            $insStmt = $this->db->prepare("INSERT INTO `settings` (`setting_key`, `setting_value`) VALUES (:key, :val)");
 
             foreach ($cleanData as $key => $val) {
-                $stmt->execute([':key' => $key, ':val' => $val]);
+                $upStmt->execute([':val' => $val, ':key' => $key]);
+                if ($upStmt->rowCount() === 0) {
+                    $chkStmt->execute([':key' => $key]);
+                    if (!$chkStmt->fetch()) {
+                        $insStmt->execute([':key' => $key, ':val' => $val]);
+                    }
+                }
             }
             $this->db->commit();
 
             // Fetch the updated settings to return in response
-            $stmtAll = $this->db->query("SELECT setting_key, setting_value FROM `settings`");
+            $stmtAll = $this->db->query("SELECT setting_key, setting_value FROM `settings` ORDER BY id ASC");
             $rows = $stmtAll ? $stmtAll->fetchAll(PDO::FETCH_ASSOC) : [];
             $allSettings = [];
             foreach ($rows as $r) {

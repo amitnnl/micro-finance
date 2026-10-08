@@ -27,19 +27,18 @@ class JWT {
         $tokenParts = explode('.', $jwt);
         if (count($tokenParts) !== 3) return false;
 
-        $header = base64_decode($tokenParts[0]);
-        $payload = base64_decode($tokenParts[1]);
-        $signatureProvided = $tokenParts[2];
-
-        $base64UrlHeader = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($header));
-        $base64UrlPayload = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($payload));
-
-        $signature = hash_hmac('sha256', $base64UrlHeader . "." . $base64UrlPayload, self::getSecret(), true);
+        $signature = hash_hmac('sha256', $tokenParts[0] . "." . $tokenParts[1], self::getSecret(), true);
         $base64UrlSignature = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($signature));
 
-        if ($base64UrlSignature !== $signatureProvided) return false;
+        if (!hash_equals($base64UrlSignature, $tokenParts[2])) return false;
 
-        $data = json_decode($payload, true);
+        $payloadRaw = str_replace(['-', '_'], ['+', '/'], $tokenParts[1]);
+        $pad = strlen($payloadRaw) % 4;
+        if ($pad) {
+            $payloadRaw .= str_repeat('=', 4 - $pad);
+        }
+        $data = json_decode(base64_decode($payloadRaw), true);
+        if (!is_array($data)) return false;
         if (isset($data['exp']) && $data['exp'] < time()) return false;
 
         return $data;
