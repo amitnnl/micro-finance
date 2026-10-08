@@ -31,16 +31,6 @@ const getInitialSettings = () => {
     if (cached) {
       const parsed = JSON.parse(cached);
       if (parsed && typeof parsed === 'object') {
-        // Clear out old hardcoded placeholders if present in cached browser storage
-        if (parsed.institution_name && /kaspr/i.test(parsed.institution_name)) {
-          delete parsed.institution_name;
-        }
-        if (parsed.signatory_name && /karan\s*singh/i.test(parsed.signatory_name)) {
-          delete parsed.signatory_name;
-        }
-        if (parsed.email && /kaspr/i.test(parsed.email)) {
-          delete parsed.email;
-        }
         return { ...defaultSettings, ...parsed };
       }
     }

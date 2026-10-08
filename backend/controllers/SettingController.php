@@ -27,12 +27,29 @@ class SettingController {
         'signatory_title' => 'Authorized Officer'
     ];
 
+    private static $tableChecked = false;
+
     public function __construct() {
         $this->db = Database::getInstance()->getConnection();
         $this->ensureSettingsTable();
     }
 
     private function ensureSettingsTable() {
+        if (self::$tableChecked) {
+            return;
+        }
+
+        try {
+            // Fast sub-millisecond check: if settings table already exists, skip DDL entirely
+            $check = $this->db->query("SELECT 1 FROM `settings` LIMIT 1");
+            if ($check !== false) {
+                self::$tableChecked = true;
+                return;
+            }
+        } catch (Exception $e) {
+            // Table does not exist, proceed with creation
+        }
+
         $query = "CREATE TABLE IF NOT EXISTS `settings` (
             `id` INT AUTO_INCREMENT PRIMARY KEY,
             `setting_key` VARCHAR(100) UNIQUE NOT NULL,
@@ -53,15 +70,8 @@ class SettingController {
                     $ins->execute([':k' => $k, ':v' => (string)$v]);
                 }
             }
-        } else {
-            // Populate any newly introduced default keys without touching existing customized values
-            $insMissing = $this->db->prepare("INSERT IGNORE INTO `settings` (`setting_key`, `setting_value`) VALUES (:k, :v)");
-            foreach (self::$defaultSettings as $k => $v) {
-                try {
-                    $insMissing->execute([':k' => $k, ':v' => (string)$v]);
-                } catch (Exception $e) {}
-            }
         }
+        self::$tableChecked = true;
     }
 
     public function getSettings() {
@@ -87,7 +97,7 @@ class SettingController {
     }
 
     public function updateSettings() {
-        AuthHelper::requireRole(['admin']);
+        AuthHelper::requireRole(['admin', 'manager']);
         try {
             $rawInput = file_get_contents('php://input');
             $data = json_decode($rawInput, true);
@@ -132,12 +142,14 @@ class SettingController {
                 Response::error('No valid settings fields provided', 400);
             }
 
-            // Update MySQL database directly
-            $stmt = $this->db->prepare("INSERT INTO `settings` (`setting_key`, `setting_value`) VALUES (:key, :val1) ON DUPLICATE KEY UPDATE `setting_value` = :val2");
+            // Update MySQL database directly in an atomic transaction
+            $this->db->beginTransaction();
+            $stmt = $this->db->prepare("INSERT INTO `settings` (`setting_key`, `setting_value`) VALUES (:key, :val) ON DUPLICATE KEY UPDATE `setting_value` = VALUES(`setting_value`)");
 
             foreach ($cleanData as $key => $val) {
-                $stmt->execute([':key' => $key, ':val1' => $val, ':val2' => $val]);
+                $stmt->execute([':key' => $key, ':val' => $val]);
             }
+            $this->db->commit();
 
             // Fetch the updated settings to return in response
             $stmtAll = $this->db->query("SELECT setting_key, setting_value FROM `settings`");
@@ -152,6 +164,9 @@ class SettingController {
 
             Response::json(true, 'Institution settings updated successfully!', ['settings' => $final]);
         } catch (Exception $e) {
+            if ($this->db && $this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
             Response::error('Database error: ' . $e->getMessage(), 500);
         }
     }
