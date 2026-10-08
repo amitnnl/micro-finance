@@ -32,6 +32,7 @@ class Loan {
             $r['application_date'] = !empty($r['application_date']) ? $r['application_date'] : $createdDate;
             $r['lead_date'] = !empty($r['lead_date']) ? $r['lead_date'] : $r['application_date'];
         }
+        unset($r);
         return $rows;
     }
 

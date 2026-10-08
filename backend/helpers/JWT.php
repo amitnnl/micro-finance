@@ -55,6 +55,18 @@ class JWT {
             $headers = trim($_SERVER["REDIRECT_HTTP_AUTHORIZATION"]);
         } else if (!empty($_SERVER['HTTP_X_AUTHORIZATION'])) {
             $headers = trim($_SERVER["HTTP_X_AUTHORIZATION"]);
+        } else if (!empty($_SERVER['REDIRECT_HTTP_X_AUTHORIZATION'])) {
+            $headers = trim($_SERVER["REDIRECT_HTTP_X_AUTHORIZATION"]);
+        } else if (function_exists('getallheaders')) {
+            $requestHeaders = getallheaders();
+            if (is_array($requestHeaders)) {
+                foreach ($requestHeaders as $k => $v) {
+                    if (strcasecmp($k, 'Authorization') === 0 || strcasecmp($k, 'X-Authorization') === 0) {
+                        $headers = trim($v);
+                        break;
+                    }
+                }
+            }
         } else if (function_exists('apache_request_headers')) {
             $requestHeaders = apache_request_headers();
             if (is_array($requestHeaders)) {

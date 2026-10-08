@@ -11,6 +11,19 @@ class Schema {
             return;
         }
 
+        // Fast check: If tables already exist and not forcing, return immediately to eliminate table locking
+        if (!$force) {
+            try {
+                $check = $db->query("SELECT 1 FROM `users` LIMIT 1");
+                if ($check !== false) {
+                    self::$ensured = true;
+                    return;
+                }
+            } catch (Exception $e) {
+                // Table doesn't exist yet, proceed with migration
+            }
+        }
+
         try {
             self::createTables($db);
             self::upgradeColumns($db);

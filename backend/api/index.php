@@ -4,6 +4,18 @@
  * Handles CORS, route matching, and dispatches requests to appropriate controllers.
  */
 
+// Global Exception Handler: Return clean JSON responses rather than unformatted errors
+set_exception_handler(function($e) {
+    http_response_code(500);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode([
+        'success' => false,
+        'message' => $e->getMessage(),
+        'error_code' => $e->getCode()
+    ]);
+    exit();
+});
+
 require_once __DIR__ . '/../config/Cors.php';
 require_once __DIR__ . '/../helpers/Response.php';
 

@@ -1,8 +1,29 @@
 # ----------------------------------------------------------------------
+# LiteSpeed / HTTP3 / QUIC Protocol Optimization
+# Disable Alt-Svc to prevent net::ERR_QUIC_PROTOCOL_ERROR on Hostinger / LiteSpeed
+# ----------------------------------------------------------------------
+<IfModule mod_headers.c>
+  Header unset Alt-Svc
+  Header always unset Alt-Svc
+</IfModule>
+
+# ----------------------------------------------------------------------
+# Pass Authorization Headers to PHP-FPM / FastCGI
+# ----------------------------------------------------------------------
+SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
+SetEnvIf X-Authorization "(.*)" HTTP_X_AUTHORIZATION=$1
+
+# ----------------------------------------------------------------------
 # React SPA Client-Side Routing & Apache Configuration
 # ----------------------------------------------------------------------
 <IfModule mod_rewrite.c>
   RewriteEngine On
+
+  # Pass Authorization Header in mod_rewrite
+  RewriteCond %{HTTP:Authorization} .
+  RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+  RewriteCond %{HTTP:X-Authorization} .
+  RewriteRule .* - [E=HTTP_X_AUTHORIZATION:%{HTTP:X-Authorization}]
 
   # 1. Allow API & Backend requests to pass through untouched
   RewriteCond %{REQUEST_URI} ^/backend/ [OR]

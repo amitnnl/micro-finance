@@ -16,6 +16,16 @@ Options -Indexes
   </IfModule>
 </FilesMatch>
 
+# Disable HTTP/3 QUIC Alt-Svc to avoid ERR_QUIC_PROTOCOL_ERROR on Hostinger / LiteSpeed
+<IfModule mod_headers.c>
+  Header unset Alt-Svc
+  Header always unset Alt-Svc
+</IfModule>
+
+# Pass Authorization Headers to PHP-FPM / FastCGI
+SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
+SetEnvIf X-Authorization "(.*)" HTTP_X_AUTHORIZATION=$1
+
 # Disallow direct browser requests to internal architecture folders
 <IfModule mod_rewrite.c>
   RewriteEngine On
@@ -23,6 +33,8 @@ Options -Indexes
   # Pass Authorization Header to PHP FastCGI/FPM
   RewriteCond %{HTTP:Authorization} .
   RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+  RewriteCond %{HTTP:X-Authorization} .
+  RewriteRule .* - [E=HTTP_X_AUTHORIZATION:%{HTTP:X-Authorization}]
 
   # Allow public access only to the api directory and migration script
   RewriteRule ^api/ - [L]
