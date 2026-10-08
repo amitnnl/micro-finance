@@ -199,8 +199,8 @@ INSERT INTO `users` (`name`, `email`, `phone`, `password`, `role`, `status`) VAL
 ('Admin User', 'admin@microfinance.com', '9876543210', '$2y$10$Q0rFQWNNitaIrHug8NdXE.pCMSH6KdjEXJJ0e6rfpp0yIhSor6gbu', 'admin', 'active')
 ON DUPLICATE KEY UPDATE `password` = VALUES(`password`), `role` = 'admin', `status` = 'active';
 
--- Default Settings
-INSERT INTO `settings` (`setting_key`, `setting_value`) VALUES
+-- Default Settings (INSERT IGNORE ensures custom institution configurations are never overwritten)
+INSERT IGNORE INTO `settings` (`setting_key`, `setting_value`) VALUES
 ('institution_name', 'Microfinance Institution'),
 ('tagline', 'Registered Non-Banking Financial Company (NBFC - MFI)'),
 ('cin_number', 'U65929RJ2024NPL089123'),
@@ -219,6 +219,5 @@ INSERT INTO `settings` (`setting_key`, `setting_value`) VALUES
 ('max_loan_limit', '200000'),
 ('receipt_terms', 'All payments are non-refundable. Please keep this official receipt for future reference.'),
 ('signatory_name', 'Authorized Signatory'),
-('signatory_title', 'Authorized Officer')
-ON DUPLICATE KEY UPDATE `setting_value` = VALUES(`setting_value`);
+('signatory_title', 'Authorized Officer');
 

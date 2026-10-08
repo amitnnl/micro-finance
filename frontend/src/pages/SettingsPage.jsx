@@ -15,7 +15,8 @@ import {
  Sparkles,
  MapPin,
  Mail,
- FileText
+ FileText,
+ AlertCircle
 } from 'lucide-react';
 
 export default function SettingsPage() {
@@ -24,6 +25,7 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
 
   const [settings, setSettings] = useState(globalSettings || {
     institution_name: 'Microfinance Institution',
@@ -113,6 +115,7 @@ export default function SettingsPage() {
     if (e && e.preventDefault) e.preventDefault();
     setSaving(true);
     setSavedSuccess(false);
+    setErrorMsg('');
     try {
       const res = await api.post('settings', settings);
       if (res.success) {
@@ -123,12 +126,13 @@ export default function SettingsPage() {
         if (updateLocalSettings) {
           updateLocalSettings(savedData);
         }
-        setTimeout(() => setSavedSuccess(false), 3000);
+        setTimeout(() => setSavedSuccess(false), 4000);
       } else {
-        alert(res.message || 'Failed to save settings');
+        setErrorMsg(res.message || 'Failed to save settings');
       }
     } catch (err) {
-      alert(err.message || 'Failed to save settings');
+      console.error('Save settings error:', err);
+      setErrorMsg(err.message || 'Failed to save settings: Server Error');
     } finally {
       setSaving(false);
     }
@@ -178,6 +182,14 @@ export default function SettingsPage() {
         <div className="bg-teal-50 border border-teal-300 text-teal-950 p-3 rounded-xl flex items-center space-x-2.5 text-xs font-bold animate-fade-in shadow-sm">
           <CheckCircle2 className="h-4 w-4 text-emerald-600" />
           <span>Institution customization settings saved successfully to system database!</span>
+        </div>
+      )}
+
+      {/* Error Notification Banner */}
+      {errorMsg && (
+        <div className="bg-rose-50 border border-rose-300 text-rose-950 p-3 rounded-xl flex items-center space-x-2.5 text-xs font-bold animate-fade-in shadow-sm">
+          <AlertCircle className="h-4 w-4 text-rose-600 flex-shrink-0" />
+          <span>{errorMsg}</span>
         </div>
       )}
 

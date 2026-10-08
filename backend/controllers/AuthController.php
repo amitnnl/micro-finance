@@ -96,7 +96,7 @@ class AuthController {
 
         $user = $this->userModel->findById($userData['id']);
         if (!$user) {
-            Response::error('User not found', 44);
+            Response::error('User not found', 404);
         }
 
         Response::json(true, 'User details retrieved', ['user' => $user]);

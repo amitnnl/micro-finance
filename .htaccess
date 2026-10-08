@@ -18,6 +18,7 @@ SetEnvIf X-Authorization "(.*)" HTTP_X_AUTHORIZATION=$1
 # ----------------------------------------------------------------------
 <IfModule mod_rewrite.c>
   RewriteEngine On
+  CGIPassAuth On
 
   # Pass Authorization Header in mod_rewrite
   RewriteCond %{HTTP:Authorization} .

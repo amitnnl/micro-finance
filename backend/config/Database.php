@@ -29,11 +29,9 @@ class Database {
                         list($key, $val) = explode('=', $line, 2);
                         $key = trim($key);
                         $val = trim($val, " \t\n\r\0\x0B\"'");
-                        if (getenv($key) === false) {
-                            putenv("{$key}={$val}");
-                            $_ENV[$key] = $val;
-                            $_SERVER[$key] = $val;
-                        }
+                        putenv("{$key}={$val}");
+                        $_ENV[$key] = $val;
+                        $_SERVER[$key] = $val;
                     }
                 }
                 break;
@@ -49,17 +47,17 @@ class Database {
         if (file_exists($configFile)) {
             $customConfig = include $configFile;
             if (is_array($customConfig)) {
-                $this->host = $customConfig['DB_HOST'] ?? $this->host;
-                $this->db_name = $customConfig['DB_NAME'] ?? $this->db_name;
-                $this->username = $customConfig['DB_USER'] ?? $this->username;
-                $this->password = $customConfig['DB_PASS'] ?? $this->password;
+                if (!empty($customConfig['DB_HOST'])) $this->host = $customConfig['DB_HOST'];
+                if (!empty($customConfig['DB_NAME'])) $this->db_name = $customConfig['DB_NAME'];
+                if (isset($customConfig['DB_USER'])) $this->username = $customConfig['DB_USER'];
+                if (isset($customConfig['DB_PASS'])) $this->password = $customConfig['DB_PASS'];
             }
+        } else {
+            $this->host = getenv('DB_HOST') ?: $this->host;
+            $this->db_name = getenv('DB_NAME') ?: $this->db_name;
+            $this->username = (getenv('DB_USER') !== false && getenv('DB_USER') !== '') ? getenv('DB_USER') : $this->username;
+            $this->password = (getenv('DB_PASS') !== false) ? getenv('DB_PASS') : $this->password;
         }
-
-        $this->host = getenv('DB_HOST') ?: $this->host;
-        $this->db_name = getenv('DB_NAME') ?: $this->db_name;
-        $this->username = getenv('DB_USER') !== false ? getenv('DB_USER') : $this->username;
-        $this->password = getenv('DB_PASS') !== false ? getenv('DB_PASS') : $this->password;
 
         try {
             // Attempt MySQL Connection via PDO

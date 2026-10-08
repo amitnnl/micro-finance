@@ -29,6 +29,7 @@ SetEnvIf X-Authorization "(.*)" HTTP_X_AUTHORIZATION=$1
 # Disallow direct browser requests to internal architecture folders
 <IfModule mod_rewrite.c>
   RewriteEngine On
+  CGIPassAuth On
 
   # Pass Authorization Header to PHP FastCGI/FPM
   RewriteCond %{HTTP:Authorization} .

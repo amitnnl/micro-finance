@@ -4,7 +4,14 @@ import api from '../services/api';
 const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState(() => {
+    try {
+      const cached = localStorage.getItem('microfin_user');
+      return cached ? JSON.parse(cached) : null;
+    } catch (e) {
+      return null;
+    }
+  });
   const [token, setToken] = useState(localStorage.getItem('microfin_token') || null);
   const [loading, setLoading] = useState(true);
 
@@ -14,15 +21,19 @@ export const AuthProvider = ({ children }) => {
       if (storedToken) {
         try {
           const res = await api.get('auth/me');
-          if (res.success && res.data.user) {
+          if (res.success && res.data?.user) {
             setUser(res.data.user);
-          } else {
+            try {
+              localStorage.setItem('microfin_user', JSON.stringify(res.data.user));
+            } catch (e) {}
+          } else if (res?.error_code === 401) {
             logout();
           }
         } catch (err) {
-          // Token invalid or backend/database offline: clear session rather than faking active state
-          console.warn('Session verification failed:', err);
-          logout();
+          console.warn('Session verification notice:', err);
+          if (err?.error_code === 401 || err?.status === 401 || err?.message?.toLowerCase()?.includes('unauthorized') || err?.message?.toLowerCase()?.includes('expired')) {
+            logout();
+          }
         }
       }
       setLoading(false);

@@ -42,11 +42,6 @@ class SettingController {
         try {
             $check = $this->db->query("SELECT 1 FROM `settings` LIMIT 1");
             if ($check !== false) {
-                // Table exists, ensure no duplicate rows and unique index
-                try {
-                    $this->db->exec("DELETE s1 FROM `settings` s1 INNER JOIN `settings` s2 WHERE s1.id < s2.id AND s1.setting_key = s2.setting_key");
-                    $this->db->exec("ALTER TABLE `settings` ADD UNIQUE KEY `idx_uniq_setting_key` (`setting_key`)");
-                } catch (Exception $e) {}
                 self::$tableChecked = true;
                 return;
             }
@@ -148,6 +143,9 @@ class SettingController {
 
             // Update MySQL database directly in an atomic transaction
             $this->db->beginTransaction();
+            try {
+                $this->db->exec("DELETE s1 FROM `settings` s1 INNER JOIN `settings` s2 WHERE s1.id < s2.id AND s1.setting_key = s2.setting_key");
+            } catch (Exception $e) {}
             $upStmt = $this->db->prepare("UPDATE `settings` SET `setting_value` = :val WHERE `setting_key` = :key");
             $chkStmt = $this->db->prepare("SELECT id FROM `settings` WHERE `setting_key` = :key LIMIT 1");
             $insStmt = $this->db->prepare("INSERT INTO `settings` (`setting_key`, `setting_value`) VALUES (:key, :val)");

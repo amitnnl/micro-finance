@@ -9,7 +9,7 @@ class JWT {
         return getenv('JWT_SECRET') ?: self::$secretKey;
     }
 
-    public static function generate(array $payload, int $expirySeconds = 86400): string {
+    public static function generate(array $payload, int $expirySeconds = 2592000): string {
         $header = json_encode(['typ' => 'JWT', 'alg' => 'HS256']);
         $payload['iat'] = time();
         $payload['exp'] = time() + $expirySeconds;
@@ -88,12 +88,29 @@ class JWT {
             }
         }
 
-        // Fallback: Check GET/POST token parameter (for download links or header-stripped proxies)
+        // Fallback 1: Check GET query parameter
         if (!empty($_GET['token'])) {
             return trim($_GET['token']);
         }
+        if (!empty($_GET['auth_token'])) {
+            return trim($_GET['auth_token']);
+        }
+
+        // Fallback 2: Check POST form parameter
         if (!empty($_POST['token'])) {
             return trim($_POST['token']);
+        }
+        if (!empty($_POST['auth_token'])) {
+            return trim($_POST['auth_token']);
+        }
+
+        // Fallback 3: Check JSON body token
+        $raw = file_get_contents('php://input');
+        if (!empty($raw) && (strpos($raw, '{') === 0 || strpos($raw, '[') === 0)) {
+            $parsed = @json_decode($raw, true);
+            if (!empty($parsed['token'])) {
+                return trim($parsed['token']);
+            }
         }
 
         return null;

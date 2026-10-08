@@ -47,6 +47,8 @@ api.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
       config.headers['X-Authorization'] = `Bearer ${token}`;
+      // Bulletproof query fallback for proxies/hosts that strip HTTP Authorization headers
+      config.params.token = token;
     }
     return config;
   },
